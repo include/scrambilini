@@ -85,6 +85,13 @@ for (let i = 0; i < 500; i++) {
   if (!p.voices.every((voice: Record<string, unknown>) => voice.name && voice.lang && voice.voiceURI)) {
     problem(`profile ${i}: voice without name, lang or URI`);
   }
+  if (!p.webgpu || !p.webgpu.architecture) problem(`profile ${i}: empty WebGPU adapter info`);
+  if (p.system === 'macos' && p.webgpu.vendor !== 'apple') {
+    problem(`profile ${i}: macOS identity has WebGPU vendor ${p.webgpu.vendor}`);
+  }
+  if (p.system !== 'macos' && !['nvidia', 'intel', 'amd', 'mesa'].includes(p.webgpu.vendor)) {
+    problem(`profile ${i}: ${p.system} identity has WebGPU vendor ${p.webgpu.vendor}`);
+  }
 }
 
 if (problems.length) process.exit(1);

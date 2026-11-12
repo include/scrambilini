@@ -508,6 +508,16 @@
   }
 
   // ---------------------------------------------------------------------------
+  // WebGPU
+  //
+  // The adapter info is reported straight by the driver, so it has to follow the
+  // GPU the identity claims; otherwise a Windows identity still says "apple".
+  // ---------------------------------------------------------------------------
+  if (window.GPUAdapter && window.GPUAdapter.prototype) {
+    defineGetter(GPUAdapter.prototype, 'info', () => Object.assign({}, P.webgpu), 'info');
+  }
+
+  // ---------------------------------------------------------------------------
   // Audio
   // ---------------------------------------------------------------------------
   if (CONFIG.spoofAudio && window.BaseAudioContext) {

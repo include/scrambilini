@@ -142,6 +142,35 @@ window.addEventListener('load', () => {
   out.finalTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   out.finalScreen = { w: screen.width, h: screen.height, dpr: devicePixelRatio };
   out.finalCores = N.hardwareConcurrency;
+
+  // WebGPU adapter info, and the settled WebGL renderer, so the two can be
+  // cross-checked against each other.
+  out.webgpu = null;
+  if (N.gpu) {
+    try {
+      const adapter = await Promise.race([
+        N.gpu.requestAdapter(),
+        new Promise((resolve) => setTimeout(() => resolve(null), 2000)),
+      ]);
+      if (adapter && adapter.info) {
+        out.webgpu = {
+          vendor: adapter.info.vendor,
+          architecture: adapter.info.architecture,
+          device: adapter.info.device,
+          description: adapter.info.description,
+        };
+      }
+    } catch (error) {
+      out.webgpu = { error: String(error) };
+    }
+  }
+  out.finalRenderer = null;
+  try {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('webgl');
+    const debug = context && context.getExtension('WEBGL_debug_renderer_info');
+    out.finalRenderer = context && debug ? context.getParameter(debug.UNMASKED_RENDERER_WEBGL) : null;
+  } catch (error) { /* ignore */ }
   out.tEnd = performance.now();
 
   // Fonts (the identity's platform decides what is "installed") and the

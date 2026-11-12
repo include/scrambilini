@@ -136,6 +136,11 @@ export interface Probe {
   finalTimezone: string;
   finalScreen: { w: number; h: number; dpr: number };
   finalCores: number;
+  webgpu:
+    | { vendor: string; architecture: string; device: string; description: string }
+    | { error: string }
+    | null;
+  finalRenderer: string | null;
   coherenceMs: number;
   coherenceMatched: boolean;
   tLoad: number;

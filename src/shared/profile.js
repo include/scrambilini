@@ -188,6 +188,37 @@ var __scrambiliniBuildProfile = (function () {
     return 'us';
   }
 
+  // WebGPU adapter info, matched to the GPU the identity claims. Chrome reports
+  // this per driver, so a Windows identity that still says "apple / metal-3" is
+  // an easy mismatch to spot.
+  const WEBGPU_INFO = [
+    ['Apple', { vendor: 'apple', architecture: 'metal-3', device: '', description: '' }],
+    ['RTX 3060', { vendor: 'nvidia', architecture: 'ampere', device: '0x2504', description: 'NVIDIA GeForce RTX 3060' }],
+    ['RTX 4070', { vendor: 'nvidia', architecture: 'ada-lovelace', device: '0x2786', description: 'NVIDIA GeForce RTX 4070' }],
+    ['1660', { vendor: 'nvidia', architecture: 'turing', device: '0x21c4', description: 'NVIDIA GeForce GTX 1660 SUPER' }],
+    ['UHD Graphics 620', { vendor: 'intel', architecture: 'gen-9', device: '0x3ea0', description: 'Intel(R) UHD Graphics 620' }],
+    ['Iris(R) Xe', { vendor: 'intel', architecture: 'gen-12lp', device: '0x9a49', description: 'Intel(R) Iris(R) Xe Graphics' }],
+    ['Xe Graphics', { vendor: 'intel', architecture: 'gen-12lp', device: '0x9a49', description: 'Intel(R) Xe Graphics' }],
+    ['RX 6600', { vendor: 'amd', architecture: 'rdna-2', device: '0x73ff', description: 'AMD Radeon RX 6600' }],
+    ['RX 580', { vendor: 'amd', architecture: 'gcn-4', device: '0x67df', description: 'AMD Radeon RX 580' }],
+    ['llvmpipe', { vendor: 'mesa', architecture: 'llvmpipe', device: '', description: 'llvmpipe (LLVM 15.0.7, 256 bits)' }],
+  ];
+
+  function webgpuFor(renderer) {
+    const text = String(renderer);
+    for (const [needle, info] of WEBGPU_INFO) {
+      if (text.includes(needle)) return Object.assign({}, info);
+    }
+    // Fall back on the vendor, so a new catalog entry always gets a plausible
+    // adapter rather than an empty one.
+    if (/Apple/i.test(text)) return { vendor: 'apple', architecture: 'metal-3', device: '', description: '' };
+    if (/NVIDIA/i.test(text)) return { vendor: 'nvidia', architecture: 'ampere', device: '', description: text };
+    if (/Intel/i.test(text)) return { vendor: 'intel', architecture: 'gen-12lp', device: '', description: text };
+    if (/AMD/i.test(text)) return { vendor: 'amd', architecture: 'rdna-2', device: '', description: text };
+    if (/llvmpipe|Mesa/i.test(text)) return { vendor: 'mesa', architecture: 'llvmpipe', device: '', description: text };
+    return { vendor: '', architecture: '', device: '', description: '' };
+  }
+
   const TIMEZONES = [
     'Europe/Lisbon', 'Europe/Madrid', 'Europe/Paris', 'Europe/Berlin',
     'Europe/Amsterdam', 'Europe/Rome', 'Europe/Stockholm', 'Europe/Warsaw',
@@ -416,6 +447,7 @@ var __scrambiliniBuildProfile = (function () {
       memory: locks.hardware && locks.hardware.memory ? Number(locks.hardware.memory) : memoryRan,
       glVendor,
       glRenderer,
+      webgpu: webgpuFor(glRenderer),
       fonts: system.fonts,
       allFonts: ALL_FONTS,
       sampleRate: pick([44100, 48000]),

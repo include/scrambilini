@@ -8,8 +8,8 @@ consistent device each time you open a tab.
 Both sides of the fingerprint are scrambled and kept in agreement:
 
 - **JavaScript surface** — `navigator`, screen, timezone, languages, canvas,
-  WebGL, audio, fonts, plugins, battery, connection, media devices, storage quota,
-  speech voices, keyboard layout, `Intl` locale.
+  WebGL, WebGPU adapter info, audio, fonts, plugins, battery, connection, media
+  devices, storage quota, speech voices, keyboard layout, `Intl` locale.
 - **HTTP surface** — `User-Agent`, `sec-ch-ua*`, `Accept-Language`, `DNT`, sent
   through `declarativeNetRequest` header rules.
 
@@ -148,7 +148,7 @@ A mix of all three:
 
 | Kind | Examples | Where |
 | --- | --- | --- |
-| **Static catalog** (hand-written) | 3 operating systems, 31 screen sizes, 18 GPU strings, 65 system font names, 44 macOS / 12 Windows / 12 Linux speech voices, 5 keyboard layouts, 6 core counts, 3 RAM sizes, 24 timezones, 17 language sets | `SYSTEMS`, `VOICES` in `profile.js` |
+| **Static catalog** (hand-written) | 3 operating systems, 31 screen sizes, 18 GPU strings with matching WebGPU adapters, 65 system font names, 44 macOS / 12 Windows / 12 Linux speech voices, 5 keyboard layouts, 6 core counts, 3 RAM sizes, 24 timezones, 17 language sets | `SYSTEMS`, `VOICES`, `WEBGPU_INFO` in `profile.js` |
 | **Picked from the catalog** | OS, screen, GPU, fonts, voices, keyboard layout, cores, memory, timezone, languages, color depth, sample rate, DNT, platform version | `build()` |
 | **Derived on the spot** | Chrome version = `realMajor - 0..4`; `Accept-Language` built with `q=0.9/0.8/0.7`; `availHeight = height - 25..90`; the UA string for the chosen OS; media device ids as random 32-char hex; storage quota and usage; the canvas/audio noise salt | `build()` |
 | **Kept real on purpose** | the UA format, the client hint order, the `Chrome/xxx.0.0.0` shape | design choice |
@@ -222,7 +222,13 @@ canvas text measurement) against the platform the identity claims.
 - **A few attributes are deliberately left real.** `canPlayType`, media
   capabilities and permission states are identical on every Chrome build of the
   same version, so spoofing them would add risk (broken playback, odd prompts)
-  for no entropy. They do not tell your tabs apart.
+  for no entropy. They do not tell your tabs apart. The same goes for the WebGL
+  extension list, shader precision, `performance.memory` and
+  `screen.orientation`: measured on this Chrome, they are constants, so faking
+  them would only add a way to get them wrong.
+- **WebGPU reports the identity's adapter.** `navigator.gpu.requestAdapter()
+  .info` follows the GPU the tab claims: `apple`/`metal-3` for a Mac identity,
+  `nvidia`/`ampere`, `intel`/`gen-12lp` or `amd`/`rdna-2` for the others.
 - **Speech voices, the `Intl` locale and the keyboard layout are per tab.** The
   voice set is a seed-chosen subset of the platform catalog, dates and numbers
   format in the identity's language, and `navigator.keyboard` reports the layout
@@ -247,5 +253,5 @@ test/                    Bun + Playwright harnesses (harness, probe, navtiming,
                          coherence, attributes, reseed, popup, locks, amiunique,
                          debug)
 data/                    the fingerprint this extension was modelled on
-dist/                    scrambilini-1.3.0.zip — ignored, built by make release
+dist/                    scrambilini-1.4.0.zip — ignored, built by make release
 ```

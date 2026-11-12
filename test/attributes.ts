@@ -78,6 +78,32 @@ await withBrowser(async (ctx) => {
       problem('toLocaleString produced something odd');
     }
 
+    // WebGPU adapter info must agree with the WebGL renderer.
+    const renderer = probe.finalRenderer || '';
+    const expectedVendor = /Apple/i.test(renderer)
+      ? 'apple'
+      : /NVIDIA/i.test(renderer)
+        ? 'nvidia'
+        : /Intel/i.test(renderer)
+          ? 'intel'
+          : /AMD/i.test(renderer)
+            ? 'amd'
+            : /llvmpipe/i.test(renderer)
+              ? 'mesa'
+              : null;
+    if (probe.webgpu && !('error' in probe.webgpu)) {
+      if (!probe.webgpu.architecture) problem('webgpu architecture is empty');
+      if (expectedVendor && probe.webgpu.vendor !== expectedVendor) {
+        problem(`webgpu vendor ${probe.webgpu.vendor} != ${expectedVendor} (${renderer})`);
+      }
+      if (expectedVendor === 'apple' && probe.webgpu.vendor !== 'apple') {
+        problem('macOS identity does not report an apple WebGPU adapter');
+      }
+      if (system !== 'macos' && probe.webgpu.vendor === 'apple') {
+        problem(`${system} identity still reports an apple WebGPU adapter`);
+      }
+    }
+
     // Voices belong to the platform and are a per-identity subset.
     if (!probe.voices.length) problem(`${system}: no speech voices`);
     if (probe.voices.filter((voice) => voice.def).length !== 1) {
@@ -128,6 +154,11 @@ await withBrowser(async (ctx) => {
         voices: probe.voices.length,
         firstVoice: probe.voices[0]?.name,
         keyboard: keys ? `${keys.KeyQ}${keys.KeyW}${keys.KeyA}${keys.KeyZ}` : null,
+        webgpu:
+          probe.webgpu && !('error' in probe.webgpu)
+            ? `${probe.webgpu.vendor}/${probe.webgpu.architecture}`
+            : null,
+        renderer: (probe.finalRenderer || '').slice(0, 50),
       }),
     );
   }
