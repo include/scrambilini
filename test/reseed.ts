@@ -28,9 +28,9 @@ async function snapshot(page: import('playwright').Page): Promise<Snapshot> {
   return {
     seed: probe.finalSeed || probe.seed,
     ua: probe.finalUa || probe.ua,
-    langs: probe.languages,
-    screen: [probe.screen.w, probe.screen.h],
-    cores: probe.hardwareConcurrency,
+    langs: probe.finalLanguages ?? probe.languages,
+    screen: [probe.finalScreen.w, probe.finalScreen.h],
+    cores: probe.finalCores,
   };
 }
 

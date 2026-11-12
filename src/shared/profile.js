@@ -134,6 +134,60 @@ var __scrambiliniBuildProfile = (function () {
   const CORES = [4, 6, 8, 10, 12, 16];
   const MEMORY = [4, 8, 16];
 
+  // Speech synthesis voices, per platform. The list is a catalog: each identity
+  // gets a seed-chosen subset, the way real installs differ by what the user has
+  // downloaded.
+  const VOICES = {
+    macos: [
+      ['Alex', 'en-US'], ['Samantha', 'en-US'], ['Victoria', 'en-US'], ['Fred', 'en-US'],
+      ['Daniel', 'en-GB'], ['Kate', 'en-GB'], ['Serena', 'en-GB'], ['Moira', 'en-IE'],
+      ['Tessa', 'en-ZA'], ['Karen', 'en-AU'], ['Thomas', 'fr-FR'], ['Amelie', 'fr-CA'],
+      ['Anna', 'de-DE'], ['Alice', 'it-IT'], ['Xander', 'nl-NL'], ['Alva', 'sv-SE'],
+      ['Zosia', 'pl-PL'], ['Luciana', 'pt-BR'], ['Joana', 'pt-PT'], ['Kyoko', 'ja-JP'],
+      ['Yuna', 'ko-KR'], ['Ting-Ting', 'zh-CN'], ['Sin-Ji', 'zh-HK'], ['Maged', 'ar-SA'],
+      ['Zarvox', 'en-US'], ['Trinoids', 'en-US'], ['Whisper', 'en-US'], ['Bubbles', 'en-US'],
+      ['Albert', 'en-US'], ['Bad News', 'en-US'], ['Bahh', 'en-US'], ['Bells', 'en-US'],
+      ['Boing', 'en-US'], ['Cellos', 'en-US'], ['Deranged', 'en-US'], ['Good News', 'en-US'],
+      ['Hysterical', 'en-US'], ['Jester', 'en-US'], ['Organ', 'en-US'], ['Superstar', 'en-US'],
+      ['Wobble', 'en-US'], ['Junior', 'en-US'], ['Ralph', 'en-US'], ['Kathy', 'en-US'],
+    ],
+    windows: [
+      ['Microsoft David - English (United States)', 'en-US'],
+      ['Microsoft Mark - English (United States)', 'en-US'],
+      ['Microsoft Zira - English (United States)', 'en-US'],
+      ['Microsoft Hazel - English (Great Britain)', 'en-GB'],
+      ['Microsoft George - English (Great Britain)', 'en-GB'],
+      ['Microsoft Hortense - French (France)', 'fr-FR'],
+      ['Microsoft Hedda - German (Germany)', 'de-DE'],
+      ['Microsoft Elsa - Italian (Italy)', 'it-IT'],
+      ['Microsoft Helena - Spanish (Spain)', 'es-ES'],
+      ['Microsoft Ayumi - Japanese (Japan)', 'ja-JP'],
+      ['Microsoft Heami - Korean (Korea)', 'ko-KR'],
+      ['Microsoft Huihui - Chinese (Simplified)', 'zh-CN'],
+    ],
+    linux: [
+      ['English (America)', 'en-US'], ['English (Great Britain)', 'en-GB'],
+      ['French (France)', 'fr-FR'], ['German (Germany)', 'de-DE'],
+      ['Spanish (Spain)', 'es-ES'], ['Italian (Italy)', 'it-IT'],
+      ['Dutch (Netherlands)', 'nl-NL'], ['Polish (Poland)', 'pl-PL'],
+      ['Portuguese (Brazil)', 'pt-BR'], ['Swedish (Sweden)', 'sv-SE'],
+      ['Japanese (Japan)', 'ja-JP'], ['Korean (Korea)', 'ko-KR'],
+    ],
+  };
+
+  /** Keyboard layout that goes with a language tag. */
+  function layoutFor(locale) {
+    const [lang, country] = String(locale || 'en-US').toLowerCase().split('-');
+    if (lang === 'fr') return 'fr';
+    if (lang === 'de') return 'de';
+    if (lang === 'pt') return 'br';
+    if (lang === 'ja') return 'jp';
+    if (lang === 'ko') return 'kr';
+    if (lang === 'sv') return 'se';
+    if (lang === 'en' && country === 'gb') return 'gb';
+    return 'us';
+  }
+
   const TIMEZONES = [
     'Europe/Lisbon', 'Europe/Madrid', 'Europe/Paris', 'Europe/Berlin',
     'Europe/Amsterdam', 'Europe/Rome', 'Europe/Stockholm', 'Europe/Warsaw',
@@ -314,6 +368,28 @@ var __scrambiliniBuildProfile = (function () {
     const coresRan = pick(CORES);
     const memoryRan = pick(MEMORY);
 
+    // Speech voices: thin the platform catalog down per seed, and put a voice
+    // that speaks the identity's language first.
+    const catalog = VOICES[system.id];
+    const shuffled = catalog.slice();
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const voiceCount = Math.min(catalog.length, ri(4, catalog.length));
+    const voiceList = shuffled.slice(0, voiceCount).map(([name, lang]) => ({
+      name,
+      lang,
+      voiceURI: system.id === 'macos' ? `com.apple.speech.synthesis.voice.${name}` : name,
+      localService: true,
+      default: false,
+    }));
+    const uiLang = String(languages[0] || 'en').split('-')[0].toLowerCase();
+    const preferred = voiceList.findIndex((voice) => String(voice.lang).toLowerCase().startsWith(uiLang));
+    if (preferred > 0) voiceList.unshift(...voiceList.splice(preferred, 1));
+    if (voiceList.length) voiceList[0].default = true;
+    const voices = voiceList;
+
     return {
       seed,
       ua,
@@ -324,6 +400,9 @@ var __scrambiliniBuildProfile = (function () {
       uaPlatform: system.uaPlatform,
       chPlatform: system.chPlatform,
       mobile: false,
+      locale: languages[0],
+      keyboard: layoutFor(languages[0]),
+      voices,
       acceptLanguage,
       languages,
       timezone: locks.timezone || timezoneRan,

@@ -138,6 +138,10 @@ window.addEventListener('load', () => {
   out.finalSeed = sessionStorage.getItem('__scrambilini_seed');
   out.finalPlatform = N.platform;
   out.finalUadPlatform = N.userAgentData ? N.userAgentData.platform : null;
+  out.finalLanguages = Array.from(N.languages);
+  out.finalTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  out.finalScreen = { w: screen.width, h: screen.height, dpr: devicePixelRatio };
+  out.finalCores = N.hardwareConcurrency;
   out.tEnd = performance.now();
 
   // Fonts (the identity's platform decides what is "installed") and the
@@ -161,6 +165,37 @@ window.addEventListener('load', () => {
     nimbus: widthOf('72px "Nimbus Sans", monospace'),
     baseline: widthOf('72px monospace'),
   };
+
+  // Speech, locale and keyboard: attributes that normally link every tab.
+  const voiceList = speechSynthesis.getVoices() || [];
+  out.voices = voiceList.map((voice) => ({
+    name: voice.name,
+    lang: voice.lang,
+    uri: voice.voiceURI,
+    def: voice.default,
+    local: voice.localService,
+  }));
+  out.locale = Intl.DateTimeFormat().resolvedOptions().locale;
+  out.localeNumber = new Intl.NumberFormat().resolvedOptions().locale;
+  out.timeZoneIntl = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  out.number = new Intl.NumberFormat().format(1234567.89);
+  out.date = new Date(Date.UTC(2021, 0, 2, 3, 4, 5)).toLocaleDateString();
+  out.dateLocaleString = new Date(Date.UTC(2021, 0, 2, 3, 4, 5)).toLocaleString();
+  out.dateStyle = (() => {
+    try {
+      return new Date(Date.UTC(2021, 0, 2)).toLocaleDateString(undefined, { dateStyle: 'long' });
+    } catch (error) {
+      return 'err:' + error.message;
+    }
+  })();
+  out.numberLocale = (1234567.89).toLocaleString();
+  const KEY_NAMES = ['KeyQ', 'KeyW', 'KeyA', 'KeyZ', 'KeyY', 'Semicolon', 'Quote', 'Digit1', 'Minus', 'Slash'];
+  if (navigator.keyboard) {
+    const map = await navigator.keyboard.getLayoutMap();
+    out.keyboard = Object.fromEntries(KEY_NAMES.map((key) => [key, map.get(key)]));
+  } else {
+    out.keyboard = null;
+  }
 
   window.__probe = out;
   document.getElementById('out').textContent = JSON.stringify(out, null, 2);

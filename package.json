@@ -1,6 +1,6 @@
 {
   "name": "scrambilini",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "type": "module",
   "description": "Browser extension that gives every tab its own coherent fingerprint",
@@ -8,6 +8,7 @@
     "test": "bun run test/all.ts",
     "test:nav": "bun run test/navtiming.ts",
     "test:coherence": "bun run test/coherence.ts",
+    "test:attributes": "bun run test/attributes.ts",
     "test:reseed": "bun run test/reseed.ts",
     "test:popup": "bun run test/popup.ts",
     "test:locks": "bun run test/locks.ts",

@@ -8,7 +8,8 @@ consistent device each time you open a tab.
 Both sides of the fingerprint are scrambled and kept in agreement:
 
 - **JavaScript surface** — `navigator`, screen, timezone, languages, canvas,
-  WebGL, audio, fonts, plugins, battery, connection, media devices, storage quota.
+  WebGL, audio, fonts, plugins, battery, connection, media devices, storage quota,
+  speech voices, keyboard layout, `Intl` locale.
 - **HTTP surface** — `User-Agent`, `sec-ch-ua*`, `Accept-Language`, `DNT`, sent
   through `declarativeNetRequest` header rules.
 
@@ -147,8 +148,8 @@ A mix of all three:
 
 | Kind | Examples | Where |
 | --- | --- | --- |
-| **Static catalog** (hand-written) | 3 operating systems, 31 screen sizes, 18 GPU strings, 65 system font names, 6 core counts, 3 RAM sizes, 24 timezones, 17 language sets | `SYSTEMS` in `profile.js` |
-| **Picked from the catalog** | OS, screen, GPU, fonts, cores, memory, timezone, languages, color depth, sample rate, DNT, platform version | `build()` |
+| **Static catalog** (hand-written) | 3 operating systems, 31 screen sizes, 18 GPU strings, 65 system font names, 44 macOS / 12 Windows / 12 Linux speech voices, 5 keyboard layouts, 6 core counts, 3 RAM sizes, 24 timezones, 17 language sets | `SYSTEMS`, `VOICES` in `profile.js` |
+| **Picked from the catalog** | OS, screen, GPU, fonts, voices, keyboard layout, cores, memory, timezone, languages, color depth, sample rate, DNT, platform version | `build()` |
 | **Derived on the spot** | Chrome version = `realMajor - 0..4`; `Accept-Language` built with `q=0.9/0.8/0.7`; `availHeight = height - 25..90`; the UA string for the chosen OS; media device ids as random 32-char hex; storage quota and usage; the canvas/audio noise salt | `build()` |
 | **Kept real on purpose** | the UA format, the client hint order, the `Chrome/xxx.0.0.0` shape | design choice |
 
@@ -175,6 +176,7 @@ bun install     # once
 # one at a time
 bun run test/navtiming.ts     # headers at various delays after tab creation
 bun run test/coherence.ts     # UA, platform hints, fonts and headers agree
+bun run test/attributes.ts    # locale, speech voices and keyboard follow the identity
 bun run test/reseed.ts        # reload keeps the identity, reseed changes it
 bun run test/popup.ts         # the popup rolls and stays open
 bun run test/locks.ts         # tick boxes survive a scramble and a reload
@@ -217,6 +219,14 @@ canvas text measurement) against the platform the identity claims.
 - **Only the font list is faked, not the glyphs.** `document.fonts.check` and
   canvas text measurement follow the identity's platform. The text a page
   actually draws still uses the real system fonts of the machine.
+- **A few attributes are deliberately left real.** `canPlayType`, media
+  capabilities and permission states are identical on every Chrome build of the
+  same version, so spoofing them would add risk (broken playback, odd prompts)
+  for no entropy. They do not tell your tabs apart.
+- **Speech voices, the `Intl` locale and the keyboard layout are per tab.** The
+  voice set is a seed-chosen subset of the platform catalog, dates and numbers
+  format in the identity's language, and `navigator.keyboard` reports the layout
+  that goes with it (AZERTY for French, QWERTZ for German, otherwise QWERTY).
 
 ## Layout
 
@@ -234,7 +244,8 @@ tools/icons.ts           crops and resizes scrambilini.png into icons/
 tools/check.ts           manifest, syntax and profile-builder checks
 scrambilini.png          the icon artwork (source, not shipped)
 test/                    Bun + Playwright harnesses (harness, probe, navtiming,
-                         coherence, reseed, popup, locks, amiunique, debug)
+                         coherence, attributes, reseed, popup, locks, amiunique,
+                         debug)
 data/                    the fingerprint this extension was modelled on
-dist/                    scrambilini-1.2.0.zip — ignored, built by make release
+dist/                    scrambilini-1.3.0.zip — ignored, built by make release
 ```

@@ -71,5 +71,21 @@ if (JSON.stringify(c.ua) !== JSON.stringify(a.ua)) {
   problem('locking one field disturbed the rest of the identity');
 }
 
+// The secondary attributes (locale, voices, keyboard) have to stay coherent
+// with the language and platform of every identity.
+const LAYOUTS = new Set(['us', 'gb', 'fr', 'de', 'br', 'jp', 'kr', 'se']);
+for (let i = 0; i < 500; i++) {
+  const p = build(i.toString(16).padStart(32, '0'), ua);
+  if (p.locale !== p.languages[0]) problem(`profile ${i}: locale != languages[0]`);
+  if (!LAYOUTS.has(p.keyboard)) problem(`profile ${i}: unknown keyboard ${p.keyboard}`);
+  if (!Array.isArray(p.voices) || !p.voices.length) problem(`profile ${i}: no speech voices`);
+  if (p.voices.filter((voice: { default: boolean }) => voice.default).length !== 1) {
+    problem(`profile ${i}: expected exactly one default voice`);
+  }
+  if (!p.voices.every((voice: Record<string, unknown>) => voice.name && voice.lang && voice.voiceURI)) {
+    problem(`profile ${i}: voice without name, lang or URI`);
+  }
+}
+
 if (problems.length) process.exit(1);
 console.log(`check: sources are fine (version ${version})`);

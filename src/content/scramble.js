@@ -277,6 +277,59 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Keyboard layout
+  //
+  // getLayoutMap() is a quiet high-entropy signal: a laptop's layout follows the
+  // user around and links every tab. It is derived from the identity's language.
+  // ---------------------------------------------------------------------------
+  const QWERTY = {
+    Backquote: '`', Digit1: '1', Digit2: '2', Digit3: '3', Digit4: '4', Digit5: '5',
+    Digit6: '6', Digit7: '7', Digit8: '8', Digit9: '9', Digit0: '0', Minus: '-',
+    Equal: '=', KeyQ: 'q', KeyW: 'w', KeyE: 'e', KeyR: 'r', KeyT: 't', KeyY: 'y',
+    KeyU: 'u', KeyI: 'i', KeyO: 'o', KeyP: 'p', BracketLeft: '[', BracketRight: ']',
+    Backslash: '\\', KeyA: 'a', KeyS: 's', KeyD: 'd', KeyF: 'f', KeyG: 'g',
+    KeyH: 'h', KeyJ: 'j', KeyK: 'k', KeyL: 'l', Semicolon: ';', Quote: "'",
+    KeyZ: 'z', KeyX: 'x', KeyC: 'c', KeyV: 'v', KeyB: 'b', KeyN: 'n', KeyM: 'm',
+    Comma: ',', Period: '.', Slash: '/', Space: ' ',
+  };
+
+  const LAYOUT_OVERRIDES = {
+    gb: { Digit2: '"', Digit3: '£' },
+    fr: {
+      Digit1: '&', Digit2: 'é', Digit3: '"', Digit4: "'", Digit5: '(', Digit6: '-',
+      Digit7: 'è', Digit8: '_', Digit9: 'ç', Digit0: 'à', Minus: ')', Equal: '=',
+      KeyQ: 'a', KeyW: 'z', KeyA: 'q', KeyZ: 'w', KeyM: ',', Semicolon: 'm',
+      Quote: 'ù', Comma: ';', Period: ':', Slash: '!', BracketLeft: '^',
+      BracketRight: '$', Backslash: '*', Backquote: '²',
+    },
+    de: {
+      KeyY: 'z', KeyZ: 'y', Semicolon: 'ö', Quote: 'ä', BracketLeft: 'ü',
+      BracketRight: '+', Backslash: '#', Minus: 'ß', Equal: '´', Slash: '-',
+      Backquote: '^',
+    },
+    br: { Semicolon: 'ç', Quote: '~', BracketLeft: '´', BracketRight: '[', Slash: ';' },
+  };
+
+  if (window.Keyboard && Keyboard.prototype.getLayoutMap) {
+    defineMethod(Keyboard.prototype, 'getLayoutMap', function getLayoutMap() {
+      const layout = Object.assign({}, QWERTY, LAYOUT_OVERRIDES[P.keyboard] || {});
+      return Promise.resolve(new Map(Object.entries(layout)));
+    }, 'getLayoutMap');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Speech synthesis voices
+  //
+  // Real installs have different voice sets, and the set is a strong identifier.
+  // Each identity gets a seed-chosen subset of its platform's catalog.
+  // ---------------------------------------------------------------------------
+  if (window.SpeechSynthesis && window.SpeechSynthesis.prototype.getVoices) {
+    defineMethod(SpeechSynthesis.prototype, 'getVoices', function getVoices() {
+      return (P.voices || []).map((voice) => Object.assign({}, voice));
+    }, 'getVoices');
+  }
+
+  // ---------------------------------------------------------------------------
   // Screen / window geometry
   // ---------------------------------------------------------------------------
   if (CONFIG.spoofScreen) {
@@ -729,30 +782,71 @@
     return s === 'Invalid Date' ? s : s.slice(s.indexOf(' ') + 1);
   }, 'toTimeString');
 
-  const OrigDTF = Intl.DateTimeFormat;
-  Intl.DateTimeFormat = new Proxy(OrigDTF, {
-    construct(target, args) {
+  // ---------------------------------------------------------------------------
+  // Intl locale
+  //
+  // navigator.language is spoofed, so the Intl defaults have to follow, or the
+  // page would report one language and format dates and numbers in another.
+  // ---------------------------------------------------------------------------
+  function patchIntl(ctorName, opts) {
+    const usesTimeZone = Boolean(opts && opts.timeZone);
+    const Original = Intl[ctorName];
+    if (!Original) return;
+    const withDefaults = (args) => {
       const [locales, options] = args;
-      if (!options || options.timeZone === undefined) {
-        args = [locales, Object.assign({}, options, { timeZone: P.timezone })];
-      }
-      return Reflect.construct(target, args);
-    },
-    apply(target, thisArg, args) {
-      const [locales, options] = args;
-      if (!options || options.timeZone === undefined) {
-        args = [locales, Object.assign({}, options, { timeZone: P.timezone })];
-      }
-      return Reflect.apply(target, thisArg, args);
-    },
-  });
+      const nextLocales = locales === undefined ? P.languages : locales;
+      const nextOptions = usesTimeZone && (!options || options.timeZone === undefined)
+        ? Object.assign({}, options, { timeZone: P.timezone })
+        : options;
+      return [nextLocales, nextOptions];
+    };
+    Intl[ctorName] = new Proxy(Original, {
+      construct(target, args) {
+        return Reflect.construct(target, withDefaults(args));
+      },
+      apply(target, thisArg, args) {
+        return Reflect.apply(target, thisArg, withDefaults(args));
+      },
+    });
+    const origResolved = Original.prototype.resolvedOptions;
+    defineMethod(Original.prototype, 'resolvedOptions', function resolvedOptions() {
+      const out = origResolved.call(this);
+      out.locale = P.locale;
+      if (usesTimeZone) out.timeZone = P.timezone;
+      return out;
+    }, 'resolvedOptions');
+  }
 
-  const origResolved = OrigDTF.prototype.resolvedOptions;
-  defineMethod(OrigDTF.prototype, 'resolvedOptions', function resolvedOptions() {
-    const out = origResolved.call(this);
-    out.timeZone = P.timezone;
-    return out;
-  }, 'resolvedOptions');
+  patchIntl('DateTimeFormat', { timeZone: true });
+  patchIntl('NumberFormat');
+  patchIntl('Collator');
+  patchIntl('PluralRules');
+  patchIntl('RelativeTimeFormat');
+  patchIntl('ListFormat');
+  patchIntl('DisplayNames');
+  patchIntl('Segmenter');
+
+  const dateLocale = (date, locales, options, defaults) => {
+    if (!Number.isFinite(date.getTime())) return 'Invalid Date';
+    // dateStyle/timeStyle cannot be combined with individual fields.
+    const styled = options && (options.dateStyle || options.timeStyle);
+    return new Intl.DateTimeFormat(locales, styled ? options : Object.assign({}, defaults, options)).format(date);
+  };
+  defineMethod(Date.prototype, 'toLocaleString', function toLocaleString(locales, options) {
+    return dateLocale(this, locales, options, {
+      year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric', second: 'numeric',
+    });
+  }, 'toLocaleString');
+  defineMethod(Date.prototype, 'toLocaleDateString', function toLocaleDateString(locales, options) {
+    return dateLocale(this, locales, options, { year: 'numeric', month: 'numeric', day: 'numeric' });
+  }, 'toLocaleDateString');
+  defineMethod(Date.prototype, 'toLocaleTimeString', function toLocaleTimeString(locales, options) {
+    return dateLocale(this, locales, options, { hour: 'numeric', minute: 'numeric', second: 'numeric' });
+  }, 'toLocaleTimeString');
+  defineMethod(Number.prototype, 'toLocaleString', function toLocaleString(locales, options) {
+    return new Intl.NumberFormat(locales, options).format(this);
+  }, 'toLocaleString');
 
   // ---------------------------------------------------------------------------
   // Publish the header set for the service worker

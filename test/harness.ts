@@ -115,6 +115,16 @@ export interface Probe {
   audioSampleRate?: number;
   audioFingerprint: string;
   native: { uaGetter: string; fnToString: string; toDataURL: string };
+  voices: Array<{ name: string; lang: string; uri: string; def: boolean; local: boolean }>;
+  locale: string;
+  localeNumber: string;
+  timeZoneIntl: string;
+  number: string;
+  numberLocale: string;
+  date: string;
+  dateLocaleString: string;
+  dateStyle: string;
+  keyboard: Record<string, string> | null;
   seed: string;
   requestHeaders: Record<string, string>;
   navHeaders: Record<string, string> | null;
@@ -122,6 +132,10 @@ export interface Probe {
   finalSeed: string;
   finalPlatform: string;
   finalUadPlatform: string | null;
+  finalLanguages: string[];
+  finalTimezone: string;
+  finalScreen: { w: number; h: number; dpr: number };
+  finalCores: number;
   coherenceMs: number;
   coherenceMatched: boolean;
   tLoad: number;

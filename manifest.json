@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Scrambilini",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Gives every tab a different browser fingerprint. Same tab stays coherent, new tab gets a new identity.",
   "minimum_chrome_version": "119",
   "permissions": [
