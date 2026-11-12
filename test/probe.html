@@ -1,0 +1,171 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>probe</title></head>
+<body><pre id="out">collecting…</pre>
+<script>
+// Snapshot taken while the parser is still running, before any hand-off could
+// have landed. Kept for diagnostics; the real fingerprint below is collected on
+// load, the way fingerprinting libraries actually do it.
+window.__early = { ua: navigator.userAgent, languages: Array.from(navigator.languages) };
+window.addEventListener('load', () => {
+(async () => {
+  const out = {};
+  out.tLoad = performance.now();
+  const N = navigator;
+  out.early = window.__early;
+  out.ua = N.userAgent;
+  out.appVersion = N.appVersion;
+  out.platform = N.platform;
+  out.vendor = N.vendor;
+  out.productSub = N.productSub;
+  out.languages = Array.from(N.languages);
+  out.language = N.language;
+  out.hardwareConcurrency = N.hardwareConcurrency;
+  out.deviceMemory = N.deviceMemory;
+  out.maxTouchPoints = N.maxTouchPoints;
+  out.doNotTrack = N.doNotTrack;
+  out.webdriver = N.webdriver;
+  out.pdfViewerEnabled = N.pdfViewerEnabled;
+  out.plugins = Array.from(N.plugins || []).map(p => p.name);
+  out.mimeTypes = Array.from(N.mimeTypes || []).map(m => m.type);
+  out.screen = {
+    w: screen.width, h: screen.height,
+    aw: screen.availWidth, ah: screen.availHeight,
+    cd: screen.colorDepth, pd: screen.pixelDepth,
+  };
+  out.window = {
+    dpr: devicePixelRatio, iw: innerWidth, ih: innerHeight,
+    ow: outerWidth, oh: outerHeight, sx: screenX, sy: screenY,
+  };
+  out.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  out.tzOffset = new Date().getTimezoneOffset();
+  out.dateString = new Date().toString();
+  out.dateHours = new Date().getHours();
+  out.utcHours = new Date().getUTCHours();
+  out.brands = (N.userAgentData && N.userAgentData.brands) || null;
+  out.uadPlatform = N.userAgentData && N.userAgentData.platform;
+  out.hev = N.userAgentData ? await N.userAgentData.getHighEntropyValues(['platformVersion','architecture','bitness','uaFullVersion']) : null;
+  out.connection = N.connection ? { et: N.connection.effectiveType, rtt: N.connection.rtt } : null;
+  out.battery = await N.getBattery().then(b => ({ level: b.level, charging: b.charging })).catch(() => null);
+  out.devices = (await N.mediaDevices.enumerateDevices().catch(() => [])).map(d => d.kind);
+  out.storage = await N.storage.estimate().then(e => e.quota).catch(() => null);
+
+  // Canvas
+  const c = document.createElement('canvas');
+  c.width = 220; c.height = 40;
+  const ctx = c.getContext('2d');
+  ctx.textBaseline = 'top';
+  ctx.font = '14px "Arial"';
+  ctx.fillStyle = '#f60';
+  ctx.fillRect(0, 0, 220, 40);
+  ctx.fillStyle = '#069';
+  ctx.fillText('Scrambilini probe', 2, 12);
+  out.canvasDataUrl = c.toDataURL().slice(-64);
+  out.canvasPixels = Array.from(ctx.getImageData(0, 0, 12, 4).data).slice(0, 24);
+  out.measure = ctx.measureText('mmmmmmmmmmlli').width;
+
+  // Font measurement: an installed font measures differently from the generic
+  // fallback, which is how measurement-based font detection works.
+  const fctx = document.createElement('canvas').getContext('2d');
+  const widthOf = (font) => {
+    fctx.font = font;
+    return fctx.measureText('mmmmmmmmmmlli').width;
+  };
+
+  // WebGL
+  const gl = document.createElement('canvas').getContext('webgl');
+  if (gl) {
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    out.glVendor = gl.getParameter(gl.VENDOR);
+    out.glRenderer = gl.getParameter(gl.RENDERER);
+    out.glUnmaskedVendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : null;
+    out.glUnmaskedRenderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null;
+    out.glMaxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    out.glVersion = gl.getParameter(gl.VERSION);
+  }
+
+  // Audio
+  try {
+    const ac = new OfflineAudioContext(1, 44100, 44100);
+    out.audioSampleRate = ac.sampleRate;
+    const osc = ac.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = 10000;
+    const comp = ac.createDynamicsCompressor();
+    osc.connect(comp); comp.connect(ac.destination);
+    osc.start(0);
+    const rendered = await ac.startRendering();
+    const data = rendered.getChannelData(0);
+    let sum = 0;
+    for (let i = 4500; i < 5000; i++) sum += Math.abs(data[i]);
+    out.audioFingerprint = sum.toFixed(12);
+  } catch (e) { out.audioFingerprint = 'err:' + e.message; }
+
+  // Native-ness checks (detection surface)
+  out.native = {
+    uaGetter: Function.prototype.toString.call(Object.getOwnPropertyDescriptor(Navigator.prototype, 'userAgent').get),
+    fnToString: Function.prototype.toString.toString(),
+    toDataURL: Function.prototype.toString.call(HTMLCanvasElement.prototype.toDataURL).slice(0, 60),
+  };
+
+  out.seed = sessionStorage.getItem('__scrambilini_seed');
+
+  // Wait until the identity the page reports matches the headers actually
+  // sent. The seed hand-off lands a few milliseconds after the document
+  // starts, and can land after the load event when the worker is cold.
+  const coherenceStart = performance.now();
+  let matched = false;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    try {
+      const res = await fetch('/headers');
+      out.requestHeaders = await res.json();
+      out.navHeaders = window.__navHeaders || null;
+      if (out.requestHeaders['user-agent'] === N.userAgent) {
+        matched = true;
+        break;
+      }
+    } catch (e) {
+      out.requestHeaders = 'err:' + e.message;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  out.coherenceMs = Math.round(performance.now() - coherenceStart);
+  out.coherenceMatched = matched;
+
+  // Read again at the end: if the identity was still being adopted when the
+  // values above were read, this shows the settled identity.
+  out.finalUa = N.userAgent;
+  out.finalSeed = sessionStorage.getItem('__scrambilini_seed');
+  out.finalPlatform = N.platform;
+  out.finalUadPlatform = N.userAgentData ? N.userAgentData.platform : null;
+  out.tEnd = performance.now();
+
+  // Fonts (the identity's platform decides what is "installed") and the
+  // matching text measurements. Read last, so they describe the settled
+  // identity.
+  out.fonts = {
+    arial: document.fonts.check('12px Arial'),
+    calibri: document.fonts.check('12px Calibri'),
+    segoe: document.fonts.check('12px "Segoe UI"'),
+    menlo: document.fonts.check('12px Menlo'),
+    liberation: document.fonts.check('12px "Liberation Sans"'),
+    nimbus: document.fonts.check('12px "Nimbus Sans"'),
+    generic: document.fonts.check('12px sans-serif'),
+  };
+  out.fontWidths = {
+    arial: widthOf('72px Arial, monospace'),
+    calibri: widthOf('72px Calibri, monospace'),
+    segoe: widthOf('72px "Segoe UI", monospace'),
+    menlo: widthOf('72px Menlo, monospace'),
+    liberation: widthOf('72px "Liberation Sans", monospace'),
+    nimbus: widthOf('72px "Nimbus Sans", monospace'),
+    baseline: widthOf('72px monospace'),
+  };
+
+  window.__probe = out;
+  document.getElementById('out').textContent = JSON.stringify(out, null, 2);
+})();
+});
+</script>
+</body>
+</html>
