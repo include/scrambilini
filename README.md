@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="scrambilini.png" width="220" alt="Scrambilini">
+</p>
+
 # Scrambilini
 
 A Chrome (MV3) extension that gives **every tab its own browser fingerprint**.
@@ -96,6 +100,11 @@ identity it already has. Use the toolbar popup to see it or to roll a new one.
 
 The popup has a small tick box on the right of every row. Tick one and that
 value is kept the next time you scramble; everything else is drawn again.
+
+The rows are the headline values. **All attributes (25)** at the bottom expands
+the full list the tab reports: platform version, client hints, architecture,
+WebGL limits, fonts, voices, keyboard, storage, battery and the rest. Long
+values are clamped in the headline rows and shown in full there.
 
 For example: scramble until the languages look right, tick **Languages**, then
 press **New identity for this tab** again. The languages stay put while the user
@@ -253,5 +262,5 @@ test/                    Bun + Playwright harnesses (harness, probe, navtiming,
                          coherence, attributes, reseed, popup, locks, amiunique,
                          debug)
 data/                    the fingerprint this extension was modelled on
-dist/                    scrambilini-1.4.0.zip — ignored, built by make release
+dist/                    scrambilini-1.5.0.zip — ignored, built by make release
 ```

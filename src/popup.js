@@ -43,8 +43,30 @@ function renderLocks(locks) {
   }
 }
 
+function setValue(id, value) {
+  const el = $(id);
+  el.textContent = value;
+  el.title = value;
+}
+
+function renderDetails(payload) {
+  const list = $('all');
+  list.replaceChildren();
+  const details = (payload && payload.details) || [];
+  for (const [label, value] of details) {
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = String(value);
+    dd.title = String(value);
+    list.append(dt, dd);
+  }
+  $('allCount').textContent = String(details.length);
+}
+
 function render(payload, locks) {
   renderLocks(locks);
+  renderDetails(payload);
   const dot = $('dot');
   if (!payload) {
     dot.classList.add('off');
@@ -52,13 +74,13 @@ function render(payload, locks) {
     return;
   }
   dot.classList.remove('off');
-  $('seed').textContent = payload.seed.slice(0, 24);
-  $('ua').textContent = payload.ua;
-  $('screen').textContent = payload.screen;
-  $('tz').textContent = payload.timezone || 'system default';
-  $('langs').textContent = (payload.languages || []).join(', ');
-  $('hw').textContent = `${payload.cores} cores · ${payload.memory} GB`;
-  $('gpu').textContent = payload.gpu;
+  setValue('seed', payload.seed.slice(0, 24));
+  setValue('ua', payload.ua);
+  setValue('screen', payload.screen);
+  setValue('tz', payload.timezone || 'system default');
+  setValue('langs', (payload.languages || []).join(', '));
+  setValue('hw', `${payload.cores} cores · ${payload.memory} GB`);
+  setValue('gpu', payload.gpu);
 }
 
 (async () => {

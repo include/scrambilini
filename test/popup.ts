@@ -46,6 +46,9 @@ try {
 
   const popup = await extensionPage(ctx);
   const before = await readPopup(popup);
+  const buttonY = async (): Promise<number> => (await popup.locator('#reseed').boundingBox())?.y ?? -1;
+  const beforeY = await buttonY();
+  const allCount = Number(await popup.locator('#allCount').textContent());
 
   await popup.click('#reseed');
   await popup.waitForFunction(
@@ -56,6 +59,7 @@ try {
   await popup.waitForTimeout(400);
 
   const after = await readPopup(popup);
+  const afterY = await buttonY();
   const live = (await probe.evaluate(() => ({
     ua: navigator.userAgent,
     seed: sessionStorage.getItem('__scrambilini_seed'),
@@ -69,6 +73,8 @@ try {
   check('popup stayed open', stillOpen);
   check('popup shows a new identity', after.seed !== before.seed);
   check('page and popup agree', live.ua === after.ua);
+  check('all attributes are listed', allCount >= 20);
+  check('scramble button stays in place', Math.abs(afterY - beforeY) < 1);
 } finally {
   await ctx.close();
 }

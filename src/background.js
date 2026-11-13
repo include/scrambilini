@@ -74,6 +74,37 @@ function buildRule(tabId, profile) {
   };
 }
 
+/** The full attribute list the popup shows under "All attributes". */
+function detailsFor(core) {
+  return [
+    ['User agent', core.ua],
+    ['Platform', `${core.platform} (${core.highEntropy.platformVersion})`],
+    ['Client hints', `${core.chPlatform} · ${core.brands.map((b) => `${b.brand} ${b.version}`).join(', ')}`],
+    ['Architecture', `${core.highEntropy.architecture}, ${core.highEntropy.bitness}-bit`],
+    ['Screen', `${core.sw}x${core.sh} @${core.dpr} · ${core.colorDepth}-bit`],
+    ['Available height', `${core.availHeight} px`],
+    ['Timezone', `${core.timezone} (${core.locale})`],
+    ['Languages', core.languages.join(', ')],
+    ['Accept-Language', core.acceptLanguage],
+    ['Cores', String(core.cores)],
+    ['Memory', `${core.memory} GB`],
+    ['WebGL vendor', core.glVendor],
+    ['WebGL renderer', core.glRenderer],
+    ['WebGPU', `${core.webgpu.vendor} / ${core.webgpu.architecture}`],
+    ['WebGL limits', `${core.maxTexSize} tex · ${core.maxVertexUniforms} uniforms`],
+    ['System fonts', `${core.fonts.length} fonts`],
+    ['Speech voices', `${core.voices.length} voices`],
+    ['Keyboard layout', core.keyboard.toUpperCase()],
+    ['Canvas / audio salt', core.seedHex],
+    ['Audio sample rate', `${core.sampleRate} Hz`],
+    ['Storage quota', `${Math.round(core.quota / 1024 ** 3)} GB`],
+    ['Media devices', `${core.devices.length}`],
+    ['Do Not Track', core.doNotTrack ?? 'not set'],
+    ['Battery', `${Math.round(core.battery.level * 100)}%${core.battery.charging ? ' · charging' : ''}`],
+    ['Connection', `${core.connection.effectiveType} · ${core.connection.rtt} ms`],
+  ];
+}
+
 function profileForSeed(seed, locks) {
   // The worker's UA is the same string the page sees, so both sides build the
   // exact same profile.
@@ -94,6 +125,7 @@ function profileForSeed(seed, locks) {
     cores: core.cores,
     memory: core.memory,
     gpu: core.glRenderer,
+    details: detailsFor(core),
   };
 }
 
