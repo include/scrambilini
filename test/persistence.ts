@@ -31,7 +31,8 @@ const popupState = (page: Page) =>
 
 const probeLanguages = async (ctx: BrowserContext) => {
   const probe = await probeTab(ctx);
-  return { langs: probe.finalLanguages, ua: probe.finalUa };
+  // The UA can coincide between two seeds; the seed is the identity.
+  return { langs: probe.finalLanguages, ua: probe.finalUa, seed: probe.finalSeed };
 };
 
 const openProbe = async (ctx: BrowserContext): Promise<{ page: Page; probe: Probe }> => {
@@ -103,7 +104,7 @@ console.log('after restart:', JSON.stringify(third));
 console.log('restored     :', JSON.stringify(restored));
 
 check('the lock is shared with new tabs', second.langs.join(', ') === shared.langs);
-check('the new tab still has its own identity', second.ua !== first.ua);
+check('the new tab still has its own identity', second.seed !== first.seed);
 check('the lock survives a browser restart', third.langs.join(', ') === shared.langs);
 check('the toggle is restored', restored.allTabs === true);
 check('the shared lock is visible after restart', restored.locks.includes('languages'));

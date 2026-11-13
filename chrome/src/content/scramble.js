@@ -173,25 +173,31 @@
   // navigator
   // ---------------------------------------------------------------------------
   const N = Navigator.prototype;
+  const CAPS = P.caps || {};
   defineGetter(N, 'userAgent', () => P.ua);
-  defineGetter(N, 'appVersion', () => P.ua.replace(/^Mozilla\//, ''));
+  defineGetter(N, 'appVersion', () => P.appVersion);
   defineGetter(N, 'appName', () => 'Netscape');
   defineGetter(N, 'appCodeName', () => 'Mozilla');
   defineGetter(N, 'product', () => 'Gecko');
-  defineGetter(N, 'productSub', () => '20030107');
-  defineGetter(N, 'vendor', () => 'Google Inc.');
+  defineGetter(N, 'productSub', () => P.productSub);
+  defineGetter(N, 'vendor', () => P.vendor);
   defineGetter(N, 'vendorSub', () => '');
   defineGetter(N, 'platform', () => P.platform);
   defineGetter(N, 'language', () => P.languages[0]);
   defineGetter(N, 'languages', () => Object.freeze(P.languages.slice()));
   defineGetter(N, 'hardwareConcurrency', () => P.cores);
-  defineGetter(N, 'deviceMemory', () => P.memory);
   defineGetter(N, 'maxTouchPoints', () => 0);
   defineGetter(N, 'cookieEnabled', () => true);
   defineGetter(N, 'onLine', () => true);
   defineGetter(N, 'doNotTrack', () => P.doNotTrack);
   defineGetter(N, 'webdriver', () => false);
-  defineGetter(N, 'pdfViewerEnabled', () => true);
+
+  // APIs that only one of the browsers actually has. Defining one the browser
+  // lacks would be a louder tell than leaving it alone.
+  if (CAPS.deviceMemory) defineGetter(N, 'deviceMemory', () => P.memory);
+  if (CAPS.pdfViewer) defineGetter(N, 'pdfViewerEnabled', () => true);
+  if (P.oscpu) defineGetter(N, 'oscpu', () => P.oscpu);
+  if (P.buildID) defineGetter(N, 'buildID', () => P.buildID);
 
   defineMethod(N, 'javaEnabled', () => false);
 
@@ -210,10 +216,10 @@
       return { brands: P.brands, mobile: false, platform: P.uaPlatform };
     },
   };
-  defineGetter(N, 'userAgentData', () => uaData);
+  if (CAPS.userAgentData) defineGetter(N, 'userAgentData', () => uaData);
 
   // Plugins / mime types (the standard Chromium PDF viewer set)
-  if (CONFIG.spoofPlugins) {
+  if (CONFIG.spoofPlugins && CAPS.plugins) {
     const PLUGIN_DEFS = [
       ['PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'],
       ['Chrome PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'],
@@ -261,8 +267,8 @@
     defineGetter(N, 'mimeTypes', () => makeMimeArray());
   }
 
-  defineGetter(N, 'connection', () => P.connection);
-  defineMethod(N, 'getBattery', () => Promise.resolve(P.battery));
+  if (CAPS.connection) defineGetter(N, 'connection', () => P.connection);
+  if (CAPS.battery) defineMethod(N, 'getBattery', () => Promise.resolve(P.battery));
 
   if (window.MediaDevices) {
     defineMethod(MediaDevices.prototype, 'enumerateDevices', function enumerateDevices() {
@@ -310,7 +316,7 @@
     br: { Semicolon: 'ç', Quote: '~', BracketLeft: '´', BracketRight: '[', Slash: ';' },
   };
 
-  if (window.Keyboard && Keyboard.prototype.getLayoutMap) {
+  if (CAPS.keyboard && window.Keyboard && Keyboard.prototype.getLayoutMap) {
     defineMethod(Keyboard.prototype, 'getLayoutMap', function getLayoutMap() {
       const layout = Object.assign({}, QWERTY, LAYOUT_OVERRIDES[P.keyboard] || {});
       return Promise.resolve(new Map(Object.entries(layout)));

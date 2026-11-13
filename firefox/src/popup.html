@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scrambilini</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: #111;
+      --muted: #666;
+      --bg: #fff;
+      --line: #e4e4e7;
+      --accent: #4f46e5;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --fg: #f4f4f5; --muted: #a1a1aa; --bg: #18181b; --line: #27272a; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      width: 340px;
+      margin: 0;
+      padding: 16px;
+      font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    header { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+    h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.18);
+    }
+    .dot.off { background: #a1a1aa; box-shadow: 0 0 0 3px rgba(161,161,170,.18); }
+    dl { margin: 0; display: grid; grid-template-columns: 92px 1fr 18px; gap: 6px 10px; align-items: start; }
+    dt { color: var(--muted); }
+    dd { margin: 0; word-break: break-word; font-variant-numeric: tabular-nums; }
+    /* Fixed height: the scramble button must not move when a value wraps. */
+    #facts {
+      height: 214px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding-right: 4px;
+    }
+    #facts dd {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    details { margin-top: 12px; }
+    summary {
+      cursor: pointer; color: var(--muted); font-size: 12px;
+      user-select: none; padding: 2px 0;
+    }
+    summary:hover { color: var(--fg); }
+    #all {
+      max-height: 210px;
+      overflow-y: auto;
+      margin-top: 8px;
+      padding-right: 4px;
+      grid-template-columns: 106px 1fr;
+      gap: 4px 8px;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    #all dt { color: var(--muted); }
+    #all dd { word-break: break-word; }
+    dt.locked { color: var(--fg); font-weight: 550; }
+    dd.locked {
+      background: rgba(79, 70, 229, .14);
+      border-radius: 4px;
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, .14);
+    }
+    .lock {
+      width: 14px; height: 14px; margin: 3px 0 0; cursor: pointer;
+      accent-color: var(--accent);
+    }
+    .seed { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+    button {
+      width: 100%; padding: 9px 12px; border-radius: 8px; cursor: pointer;
+      border: 1px solid var(--line); background: var(--accent); color: #fff;
+      font: inherit; font-weight: 600;
+    }
+    button:hover { filter: brightness(1.08); }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: .7; cursor: progress; }
+    @keyframes flash {
+      from { background: rgba(79, 70, 229, .22); }
+      to { background: transparent; }
+    }
+    dl.flash dd { animation: flash .7s ease-out; border-radius: 4px; }
+    .hint { color: var(--muted); font-size: 11px; margin: 10px 0 0; }
+    .scope {
+      display: flex; align-items: center; gap: 6px; margin-top: 10px;
+      font-size: 12px; color: var(--muted); cursor: pointer; user-select: none;
+    }
+    .scope input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+    .scope:hover { color: var(--fg); }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="dot" id="dot"></span>
+    <h1>Scrambilini</h1>
+  </header>
+
+  <dl id="facts">
+    <dt>Identity</dt><dd id="seed" class="seed">—</dd>
+    <span class="lock-spacer"></span>
+
+    <dt data-field="ua">User agent</dt><dd id="ua" data-field="ua">—</dd>
+    <input type="checkbox" class="lock" data-field="ua" aria-label="Lock user agent" title="Keep this value when scrambling again">
+
+    <dt data-field="screen">Screen</dt><dd id="screen" data-field="screen">—</dd>
+    <input type="checkbox" class="lock" data-field="screen" aria-label="Lock screen" title="Keep this value when scrambling again">
+
+    <dt data-field="timezone">Timezone</dt><dd id="tz" data-field="timezone">—</dd>
+    <input type="checkbox" class="lock" data-field="timezone" aria-label="Lock timezone" title="Keep this value when scrambling again">
+
+    <dt data-field="languages">Languages</dt><dd id="langs" data-field="languages">—</dd>
+    <input type="checkbox" class="lock" data-field="languages" aria-label="Lock languages" title="Keep this value when scrambling again">
+
+    <dt data-field="hardware">Hardware</dt><dd id="hw" data-field="hardware">—</dd>
+    <input type="checkbox" class="lock" data-field="hardware" aria-label="Lock hardware" title="Keep this value when scrambling again">
+
+    <dt data-field="gpu">GPU</dt><dd id="gpu" data-field="gpu">—</dd>
+    <input type="checkbox" class="lock" data-field="gpu" aria-label="Lock GPU" title="Keep this value when scrambling again">
+  </dl>
+
+  <hr>
+  <button id="reseed">New identity for this tab</button>
+  <label class="scope">
+    <input type="checkbox" id="allTabs">
+    <span>Lock for all tabs</span>
+  </label>
+  <p class="hint">Tick a row to keep that value when you scramble again. With <em>Lock for all tabs</em> the pins are shared by every tab and kept after a restart.</p>
+
+  <details>
+    <summary>All attributes (<span id="allCount">0</span>)</summary>
+    <dl id="all"></dl>
+  </details>
+
+  <script src="popup.js"></script>
+</body>
+</html>

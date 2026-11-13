@@ -4,28 +4,39 @@
 
 # Scrambilini
 
-A Chrome (MV3) extension that gives **every tab its own browser fingerprint**.
-The same tab keeps one coherent identity across reloads and navigations, and a
-new tab gets a new one — so fingerprinting services see a different, internally
-consistent device each time you open a tab.
+Two browser extensions, one core: **Scrambilini for Chrome** and **Scrambilini
+for Firefox**. Both give every tab its own browser fingerprint. The same tab
+keeps one coherent identity across reloads and navigations, and a new tab gets a
+new one — so fingerprinting services see a different, internally consistent
+device each time you open a tab.
+
+| | Chrome | Firefox |
+| --- | --- | --- |
+| Folder | [`chrome/`](chrome) | [`firefox/`](firefox) |
+| Identity | Chrome UAs + `sec-ch-ua*` client hints | Firefox UAs, `buildID`, `oscpu`, no client hints |
+| Background | service worker | event page (`background.scripts`) |
+| Load | `chrome://extensions` → Load unpacked | `about:debugging` → Load Temporary Add-on |
 
 Both sides of the fingerprint are scrambled and kept in agreement:
 
 - **JavaScript surface** — `navigator`, screen, timezone, languages, canvas,
   WebGL, WebGPU adapter info, audio, fonts, plugins, battery, connection, media
   devices, storage quota, speech voices, keyboard layout, `Intl` locale.
-- **HTTP surface** — `User-Agent`, `sec-ch-ua*`, `Accept-Language`, `DNT`, sent
-  through `declarativeNetRequest` header rules.
+- **HTTP surface** — `User-Agent`, `Accept-Language`, `DNT` (plus `sec-ch-ua*`
+  on Chrome), sent through `declarativeNetRequest` header rules.
 
 A tab can come out as macOS, Windows or Linux, and everything that gives the
-platform away moves together: the UA string, `navigator.platform`,
-`navigator.userAgentData`, `sec-ch-ua-platform`, the high-entropy hints, the GPU
-strings, the plausible screen sizes and the set of system fonts the page can
-enumerate.
+platform away moves together: the UA string, `navigator.platform`, the platform
+hints, the GPU strings, the plausible screen sizes and the set of system fonts
+the page can enumerate. Each build only defines the APIs its browser really has:
+the Chrome build exposes `userAgentData`, `deviceMemory`, `connection`,
+`navigator.keyboard` and plugins, and the Firefox build exposes `buildID`,
+`oscpu` and `productSub: 20100101` instead — claiming the other browser's API
+surface would be a louder tell than the value being wrong.
 
 The two are derived from the same seed with the same pure function
-(`src/shared/profile.js`), so the headers a server sees and the values a page
-reads describe the same machine.
+(`shared/src/shared/profile.js`), so the headers a server sees and the values a
+page reads describe the same machine.
 
 <p align="center">
   <img src="images/scrambilini-rand.png" width="250" alt="A fresh identity in the popup">
@@ -49,57 +60,72 @@ tabs.onCreated ──► service worker mints a seed ──► DNR session rule 
       and patches the APIs a fingerprinter reads
 ```
 
-- **`src/background.js`** owns identities. It mints a seed the moment a tab is
-  created (so even the tab's first navigation carries the spoofed headers),
-  stores it in `chrome.storage.session` under `tab:<tabId>`, and installs a
+- **`shared/src/background.js`** owns identities. It mints a seed the moment a
+  tab is created (so even the tab's first navigation carries the spoofed
+  headers), stores it in session storage under `tab:<tabId>`, and installs a
   per-tab `declarativeNetRequest` session rule (`id = 900000 + tabId`). All
-  mutations for a tab are serialised through a per-tab promise queue.
-- **`src/content/bridge.js`** (isolated world, `document_start`) gets the tab's
-  seed and hands it to the page. It reads the seed straight out of session
-  storage — which does not need the worker to wake up — and asks the worker in
-  parallel; the worker's answer wins if the two ever disagree. The hand-off
-  lands a few milliseconds after the document starts.
-- **`src/content/scramble.js`** (MAIN world, `document_start`) builds the profile
-  and replaces the getters/methods fingerprinters use. Until the worker answers
-  it uses a provisional seed, then swaps the profile in place; every getter reads
-  the live profile object, so the swap is cheap. Patched functions report
-  `[native code]` through a patched `Function.prototype.toString`.
-- **`src/shared/profile.js`** is the deterministic `(seed, realUserAgent) →
-  profile` builder shared by the worker (`importScripts`) and the page.
-- **`src/popup.html` / `src/popup.js`** show the current tab's identity and can
-  roll a new one. Each row has a tick box that locks that value, so a scramble
-  keeps it. The page swaps the identity in place, so the popup stays open and
-  shows the new values immediately.
+  mutations for a tab are serialised through a per-tab promise queue. The same
+  file runs as a Chrome service worker and as a Firefox event page.
+- **`shared/src/content/bridge.js`** (isolated world, `document_start`) gets the
+  tab's seed and hands it to the page. It reads the seed straight out of session
+  storage where that is allowed (Chrome) and asks the worker in parallel; the
+  worker's answer wins if the two ever disagree. Firefox does not expose session
+  storage to content scripts, so there the hand-off is the message round trip.
+- **`shared/src/content/scramble.js`** (MAIN world, `document_start`) builds the
+  profile and replaces the getters/methods fingerprinters use. Until the worker
+  answers it uses a provisional seed, then swaps the profile in place; every
+  getter reads the live profile object, so the swap is cheap. Patched functions
+  report `[native code]` through a patched `Function.prototype.toString`.
+- **`shared/src/shared/profile.js`** is the deterministic
+  `(seed, realUserAgent) → profile` builder shared by the worker and the page.
+  It knows which browser it was built for and only emits values that browser
+  really has.
+- **`shared/src/popup.html` / `popup.js`** show the current tab's identity and
+  can roll a new one. Each row has a tick box that locks that value, so a
+  scramble keeps it. The page swaps the identity in place, so the popup stays
+  open and shows the new values immediately.
+
+`shared/src` is the source of truth. `make sync` copies it into `chrome/src`
+and `firefox/src` and writes each build's `browser.js`; the copies are committed
+so both folders load without a build step.
 
 ## Install
 
-There is **no build step**: this folder *is* the extension, and Chrome loads the
-source files directly. Nothing has to be installed to use it.
+There is **no build step**: `chrome/` and `firefox/` are complete extensions and
+the browser loads them directly. Nothing has to be installed to use them.
 
 The test harnesses and the icon tool are TypeScript and run on
-[Bun](https://bun.sh) with Playwright:
+[Bun](https://bun.sh):
 
 ```bash
 bun install      # only for the tests and the icon tool
 ```
 
-`make build` is only for packaging: it checks the sources and writes
-`dist/scrambilini-<version>.zip`. `make release` also writes a SHA-256 next to
-it. `make icons` rebuilds `icons/` from the artwork. `make` on its own prints
-the available targets. None of that is needed to load the extension.
+`make build` packages both zips, `make release` adds their SHA-256, `make icons`
+rebuilds `shared/icons/` from the artwork. `make` on its own prints the targets.
+None of that is needed to load either extension.
+
+### Chrome
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked**.
-4. Select this folder — the one that contains `manifest.json`.
+4. Select the `chrome/` folder — the one that contains `manifest.json`.
 
-You can also drag the folder onto the `chrome://extensions` page while Developer
-mode is on.
+Chrome will **not** install a `.zip` by dragging it. `make release` writes
+`dist/scrambilini-chrome-<version>.zip`; a built copy is also on the
+[releases page](https://github.com/include/scrambilini/releases).
 
-Chrome will **not** install a `.zip` by dragging it. If you need to move the
-extension to another machine, unzip it first and then load the unzipped folder.
-`make release` writes `dist/scrambilini-<version>.zip`; a built copy is also on
-the [releases page](https://github.com/include/scrambilini/releases).
+### Firefox
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on…**.
+3. Pick `firefox/manifest.json`.
+
+Temporary add-ons last until Firefox restarts. For a permanent install, the
+build has to be signed (`web-ext sign`) or loaded from Developer Edition /
+Nightly with signing disabled; `dist/scrambilini-firefox-<version>.zip` is the
+same files zipped.
 
 Every new tab gets a new identity automatically. Reloading a tab keeps the
 identity it already has. Use the toolbar popup to see it or to roll a new one.
@@ -142,12 +168,12 @@ There are two separate steps, and the split is the whole design.
 
 **Step 1 — one real random seed per tab.** The service worker calls
 `crypto.getRandomValues` and gets 128 bits (`randomSeed` in
-`src/background.js`). This happens in `tabs.onCreated`, before the tab navigates,
+`shared/src/background.js`). This happens in `tabs.onCreated`, before the tab navigates,
 so the very first request already carries the spoofed headers.
 
 **Step 2 — everything else is deterministic from that seed.** The profile builder
 turns the seed into a number and runs a small PRNG over it (`build` in
-`src/shared/profile.js`):
+`shared/src/shared/profile.js`):
 
 ```js
 const rnd = mulberry32(hashSeed(seed)());
@@ -172,8 +198,8 @@ A mix of all three:
 | --- | --- | --- |
 | **Static catalog** (hand-written) | 3 operating systems, 31 screen sizes, 18 GPU strings with matching WebGPU adapters, 65 system font names, 44 macOS / 12 Windows / 12 Linux speech voices, 5 keyboard layouts, 6 core counts, 3 RAM sizes, 24 timezones, 17 language sets | `SYSTEMS`, `VOICES`, `WEBGPU_INFO` in `profile.js` |
 | **Picked from the catalog** | OS, screen, GPU, fonts, voices, keyboard layout, cores, memory, timezone, languages, color depth, sample rate, DNT, platform version | `build()` |
-| **Derived on the spot** | Chrome version = `realMajor - 0..4`; `Accept-Language` built with `q=0.9/0.8/0.7`; `availHeight = height - 25..90`; the UA string for the chosen OS; media device ids as random 32-char hex; storage quota and usage; the canvas/audio noise salt | `build()` |
-| **Kept real on purpose** | the UA format, the client hint order, the `Chrome/xxx.0.0.0` shape | design choice |
+| **Derived on the spot** | Chrome version = `realMajor - 0..4`, Firefox version = `realMajor - 0..3`; `Accept-Language` built with `q=0.9/0.8/0.7`; `availHeight = height - 25..90`; the UA string for the chosen OS; Firefox `buildID`; media device ids as random 32-char hex; storage quota and usage; the canvas/audio noise salt | `build()` |
+| **Kept real on purpose** | the UA format of the browser the build runs in, the client hint order, the `Chrome/xxx.0.0.0` shape | design choice |
 
 Two honest notes:
 
@@ -189,11 +215,12 @@ Two honest notes:
 
 ## Verify
 
-The `test/` folder drives a real Chromium with the extension loaded. It is
-TypeScript on Bun with Playwright:
+The `test/` folder drives a real browser with the extension loaded. It is
+TypeScript on Bun: Playwright for Chrome, Selenium + geckodriver for Firefox.
 
 ```bash
 bun install     # once
+bun run test/firefox.ts       # Firefox: temporary add-on, Firefox identities
 
 # one at a time
 bun run test/navtiming.ts     # headers at various delays after tab creation
@@ -222,6 +249,11 @@ many distinct identities it saw.
 `sec-ch-ua-platform` header, and the font list (`document.fonts.check` and
 canvas text measurement) against the platform the identity claims.
 
+`firefox.ts` loads `firefox/` as a temporary add-on and checks that the identity
+is a Firefox one: a `Firefox/` UA, `productSub: 20100101`, `buildID` and
+`oscpu` present, and no `userAgentData`, `deviceMemory`, `connection`,
+`getBattery` or client hints.
+
 ## Limitations
 
 - **The first few milliseconds of a document** use a provisional identity: the
@@ -236,7 +268,14 @@ canvas text measurement) against the platform the identity claims.
   user navigates; the window only shows up in synthetic tests.
 - **Only what a page can see is spoofed.** TLS/JA3, TCP/IP, and anything the
   browser exposes outside the patched APIs (e.g. `chrome.*`, permissions that
-  are denied rather than faked) are untouched.
+  are denied rather than faked) are untouched. The Firefox build has Firefox's
+  TLS fingerprint, which is why it claims to be Firefox.
+- **Firefox has no `storage.session` access from content scripts** (no
+  `setAccessLevel`), so the seed hand-off there is the message round trip rather
+  than the storage fast path: a few milliseconds slower, same result.
+- **Firefox needs a signed build to install permanently.** `about:debugging`
+  loads it temporarily; for a normal install the zip has to be signed with
+  `web-ext sign` or loaded on Developer Edition / Nightly.
 - **Canvas/WebGL/audio noise is deterministic per tab**, not per read, so the
   same tab keeps returning the same values.
 - **Only the font list is faked, not the glyphs.** `document.fonts.check` and
@@ -260,20 +299,20 @@ canvas text measurement) against the platform the identity claims.
 ## Layout
 
 ```
-manifest.json
-package.json             Bun tooling (tests + icon tool); ignored by Chrome
-Makefile                 make build / make release / make icons
-src/background.js        service worker: seeds, DNR rules, locks, reseed
-src/shared/profile.js    deterministic profile builder (worker + page)
-src/content/bridge.js    isolated-world seed hand-off
-src/content/scramble.js  MAIN-world API patching
-src/popup.html/.js       identity inspector, locks, reseed
-icons/                   icon16/32/48/128.png, generated by tools/icons.ts
+shared/src/              the source of truth for both builds
+  background.js          seeds, DNR rules, locks, reseed
+  shared/profile.js      deterministic profile builder (worker + page)
+  content/bridge.js      isolated-world seed hand-off
+  content/scramble.js    MAIN-world API patching
+  popup.html/.js         identity inspector, locks, reseed
+shared/icons/            icon16/32/48/128.png, generated by tools/icons.ts
+chrome/                  Chrome extension: manifest.json + generated src/ icons/
+firefox/                 Firefox extension: manifest.json + generated src/ icons/
+tools/sync.ts            copies shared/ into chrome/ and firefox/
 tools/icons.ts           crops and resizes images/scrambilini.png into icons/
-tools/check.ts           manifest, syntax and profile-builder checks
+tools/check.ts           manifests, sync, syntax and profile-builder checks
 images/                  the artwork and the screenshots in this README
-test/                    Bun + Playwright harnesses (harness, probe, navtiming,
-                         coherence, attributes, reseed, popup, locks,
-                         persistence, amiunique, debug)
-dist/                    scrambilini-1.6.0.zip — ignored, built by make release
+test/                    Bun harnesses; the Chrome ones use Playwright and the
+                         Firefox one uses Selenium + geckodriver
+dist/                    the two zips — ignored, built by make release
 ```

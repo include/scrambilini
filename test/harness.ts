@@ -11,11 +11,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const ROOT = join(import.meta.dir, '..');
+/** The Chrome extension folder (the Firefox one is ROOT/firefox). */
+export const EXT = join(ROOT, 'chrome');
 export const PORT = 8765;
 export const PROBE_URL = `http://127.0.0.1:${PORT}/probe.html`;
 
 /** Chromium derives an unpacked extension id from the absolute path. */
-export function extensionId(path = ROOT): string {
+export function extensionId(path = EXT): string {
   const hex = createHash('sha256').update(path).digest('hex').slice(0, 32);
   return [...hex].map((c) => String.fromCharCode(97 + parseInt(c, 16))).join('');
 }
@@ -56,8 +58,8 @@ export async function launch(userDataDir?: string): Promise<BrowserContext> {
     {
       headless: false,
       args: [
-        `--disable-extensions-except=${ROOT}`,
-        `--load-extension=${ROOT}`,
+        `--disable-extensions-except=${EXT}`,
+        `--load-extension=${EXT}`,
         '--no-first-run',
         '--no-default-browser-check',
       ],

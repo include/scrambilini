@@ -6,7 +6,13 @@
  * adopts the same seed a few milliseconds later and derives matching JS values.
  */
 
-importScripts('shared/profile.js');
+// Chrome loads the worker with importScripts; Firefox's event page gets these
+// files from background.scripts in the manifest instead.
+if (typeof importScripts === 'function') {
+  importScripts('shared/browser.js', 'shared/profile.js');
+}
+
+const BROWSER = typeof __scrambiliniBrowser !== 'undefined' ? __scrambiliniBrowser : 'chrome';
 
 const RULE_BASE = 900000;
 const STORAGE_PREFIX = 'tab:';
@@ -23,6 +29,8 @@ try {
 
 /** tabId -> seed, kept warm so we do not hammer storage. */
 const seeds = new Map();
+/** tabId -> the pending storage write for a freshly minted seed. */
+const pendingWrites = new Map();
 /** tabIds whose session rule is already installed by this worker instance. */
 const applied = new Set();
 /** tabId -> tail of the per-tab operation queue. */
@@ -49,11 +57,17 @@ function enqueue(tabId, task) {
 function buildRule(tabId, profile) {
   const requestHeaders = [
     { header: 'user-agent', operation: 'set', value: profile.ua },
-    { header: 'sec-ch-ua', operation: 'set', value: profile.chUa },
-    { header: 'sec-ch-ua-mobile', operation: 'set', value: profile.chUaMobile },
-    { header: 'sec-ch-ua-platform', operation: 'set', value: profile.chUaPlatform },
     { header: 'accept-language', operation: 'set', value: profile.acceptLanguage },
   ];
+  // Client hints are a Chromium thing; Firefox never sends them, so adding them
+  // there would be a mismatch rather than a disguise.
+  if (BROWSER === 'chrome') {
+    requestHeaders.push(
+      { header: 'sec-ch-ua', operation: 'set', value: profile.chUa },
+      { header: 'sec-ch-ua-mobile', operation: 'set', value: profile.chUaMobile },
+      { header: 'sec-ch-ua-platform', operation: 'set', value: profile.chUaPlatform },
+    );
+  }
 
   if (profile.dnt) {
     requestHeaders.push({ header: 'dnt', operation: 'set', value: String(profile.dnt) });
@@ -272,7 +286,17 @@ function ensureTabSeed(tabId) {
  */
 function currentSeed(tabId) {
   const cached = seeds.get(tabId);
-  if (cached) return Promise.resolve(cached);
+  if (cached) {
+    // A seed minted a moment ago may still be on its way to storage. Wait for
+    // that write, so a worker restart cannot lose the seed the page adopted —
+    // but never let a stalled write hold the hand-off hostage.
+    const pending = pendingWrites.get(tabId);
+    if (pending) {
+      const cap = new Promise((resolve) => setTimeout(resolve, 100));
+      return Promise.race([pending, cap]).then(() => cached);
+    }
+    return Promise.resolve(cached);
+  }
   return ensureTabSeed(tabId);
 }
 
@@ -425,14 +449,15 @@ chrome.tabs.onCreated.addListener((tab) => {
   if (!seeds.has(tab.id)) {
     const seed = randomSeed();
     seeds.set(tab.id, seed);
+    const stored = writeSeed(tab.id, seed).finally(() => {
+      if (pendingWrites.get(tab.id) === stored) pendingWrites.delete(tab.id);
+    });
+    pendingWrites.set(tab.id, stored);
     enqueue(tab.id, async () => {
       // Global locks apply to a brand new tab as well, so the very first
       // navigation already carries them.
       const locks = await readLocks(tab.id);
-      await Promise.all([
-        writeSeed(tab.id, seed),
-        applyHeaders(tab.id, profileForSeed(seed, locks)),
-      ]);
+      await Promise.all([stored, applyHeaders(tab.id, profileForSeed(seed, locks))]);
     });
     return;
   }

@@ -1,5 +1,5 @@
 /*
- * Build icons/icon{16,32,48,128}.png from the images/scrambilini.png artwork.
+ * Build shared/icons/icon{16,32,48,128}.png from the images/scrambilini.png artwork.
  *
  * The full composition works at 128 px; at 48 px and below the head crop keeps
  * the character readable.
@@ -32,7 +32,7 @@ for (const { size, crop, radius } of SPECS) {
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">` +
       `<rect width="${size}" height="${size}" rx="${r}" ry="${r}" fill="#fff"/></svg>`,
   );
-  const out = join(ROOT, 'icons', `icon${size}.png`);
+  const out = join(ROOT, 'shared', 'icons', `icon${size}.png`);
   await sharp(SOURCE)
     .extract(crop)
     .resize(size, size, { kernel: 'lanczos3' })
@@ -40,5 +40,5 @@ for (const { size, crop, radius } of SPECS) {
     .png({ compressionLevel: 9 })
     .toFile(out);
   const { size: bytes } = await stat(out);
-  console.log(`icons/icon${size}.png  ${size}x${size}  ${bytes} bytes`);
+  console.log(`shared/icons/icon${size}.png  ${size}x${size}  ${bytes} bytes`);
 }

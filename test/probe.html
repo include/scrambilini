@@ -46,7 +46,9 @@ window.addEventListener('load', () => {
   out.uadPlatform = N.userAgentData && N.userAgentData.platform;
   out.hev = N.userAgentData ? await N.userAgentData.getHighEntropyValues(['platformVersion','architecture','bitness','uaFullVersion']) : null;
   out.connection = N.connection ? { et: N.connection.effectiveType, rtt: N.connection.rtt } : null;
-  out.battery = await N.getBattery().then(b => ({ level: b.level, charging: b.charging })).catch(() => null);
+  out.battery = N.getBattery
+    ? await N.getBattery().then(b => ({ level: b.level, charging: b.charging })).catch(() => null)
+    : null;
   out.devices = (await N.mediaDevices.enumerateDevices().catch(() => [])).map(d => d.kind);
   out.storage = await N.storage.estimate().then(e => e.quota).catch(() => null);
 

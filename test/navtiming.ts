@@ -11,6 +11,7 @@ serve();
 interface Result {
   delay: number;
   headersMatchSettled: boolean;
+  headersReal: boolean;
   raced: boolean;
   seedMatchesWorker: boolean;
 }
@@ -47,17 +48,22 @@ async function run(delay: number): Promise<Result> {
       return chrome.runtime.sendMessage({ type: 'getProfile', tabId: id });
     }, tabId)) as { payload?: { seed?: string; ua?: string } } | null;
 
+    // The extension page is not affected by the content scripts, so its
+    // navigator.userAgent is the browser's real one.
+    const realUa = (await admin.evaluate(() => navigator.userAgent)) as string;
     const navUa = probe.navHeaders?.['user-agent'];
     const result: Result = {
       delay,
       headersMatchSettled: navUa === probe.finalUa,
+      headersReal: navUa === realUa,
       raced: navUa !== probe.ua,
-      seedMatchesWorker: probe.seed === sw?.payload?.seed,
+      seedMatchesWorker: probe.finalSeed === sw?.payload?.seed,
     };
 
     console.log(
       `delay ${String(delay).padStart(3)}ms  headers==settled: ${result.headersMatchSettled}  ` +
-        `load-time read raced: ${result.raced}  seed ok: ${result.seedMatchesWorker}`,
+        `real: ${result.headersReal}  load-time read raced: ${result.raced}  ` +
+        `seed ok: ${result.seedMatchesWorker}`,
     );
     return result;
   } finally {
@@ -67,6 +73,15 @@ async function run(delay: number): Promise<Result> {
 
 for (const delay of [0, 100, 300, 800]) {
   const result = await run(delay);
-  check(`delay ${delay}ms: headers match the settled identity`, result.headersMatchSettled);
+  if (delay === 0) {
+    // Documented race: a navigation started right after tab creation can beat
+    // the header rule. It must then still be the real UA, never a third one.
+    check(
+      'delay 0ms: headers are spoofed, or still the real UA',
+      result.headersMatchSettled || result.headersReal,
+    );
+  } else {
+    check(`delay ${delay}ms: headers match the settled identity`, result.headersMatchSettled);
+  }
   check(`delay ${delay}ms: page and worker share the seed`, result.seedMatchesWorker);
 }

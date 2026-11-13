@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Scrambilini",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Gives every tab a different browser fingerprint. Same tab stays coherent, new tab gets a new identity.",
   "minimum_chrome_version": "119",
   "permissions": [
@@ -24,7 +24,7 @@
     },
     {
       "matches": ["<all_urls>"],
-      "js": ["src/shared/profile.js", "src/content/scramble.js"],
+      "js": ["src/shared/browser.js", "src/shared/profile.js", "src/content/scramble.js"],
       "run_at": "document_start",
       "all_frames": true,
       "match_about_blank": true,

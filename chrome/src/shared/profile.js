@@ -13,6 +13,11 @@
 var __scrambiliniBuildProfile = (function () {
   'use strict';
 
+  // Set by the per-browser build (src/shared/browser.js). The Chrome build
+  // spoofs Chrome identities; the Firefox build spoofs Firefox ones.
+  const BROWSER = typeof __scrambiliniBrowser !== 'undefined' ? __scrambiliniBrowser : 'chrome';
+  const IS_FIREFOX = BROWSER === 'firefox';
+
   // ---------------------------------------------------------------------------
   // Operating systems
   //
@@ -52,6 +57,9 @@ var __scrambiliniBuildProfile = (function () {
       weight: 4,
       ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
         '(KHTML, like Gecko) Chrome/{v}.0.0.0 Safari/537.36',
+      firefoxUa: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:{v}.0) Gecko/20100101 Firefox/{v}.0',
+      oscpu: 'Intel Mac OS X 10.15',
+      appVersion: '5.0 (Macintosh)',
       platform: 'MacIntel',
       uaPlatform: 'macOS',
       chPlatform: '"macOS"',
@@ -81,6 +89,9 @@ var __scrambiliniBuildProfile = (function () {
       weight: 4,
       ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
         '(KHTML, like Gecko) Chrome/{v}.0.0.0 Safari/537.36',
+      firefoxUa: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{v}.0) Gecko/20100101 Firefox/{v}.0',
+      oscpu: 'Windows NT 10.0; Win64; x64',
+      appVersion: '5.0 (Windows)',
       platform: 'Win32',
       uaPlatform: 'Windows',
       chPlatform: '"Windows"',
@@ -107,6 +118,9 @@ var __scrambiliniBuildProfile = (function () {
       weight: 2,
       ua: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 ' +
         '(KHTML, like Gecko) Chrome/{v}.0.0.0 Safari/537.36',
+      firefoxUa: 'Mozilla/5.0 (X11; Linux x86_64; rv:{v}.0) Gecko/20100101 Firefox/{v}.0',
+      oscpu: 'Linux x86_64',
+      appVersion: '5.0 (X11)',
       platform: 'Linux x86_64',
       uaPlatform: 'Linux',
       chPlatform: '"Linux"',
@@ -291,9 +305,9 @@ var __scrambiliniBuildProfile = (function () {
     const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
     const ri = (min, max) => min + Math.floor(rnd() * (max - min + 1));
 
-    const versionMatch = /Chrome\/(\d+)/.exec(realUA || '');
-    const realMajor = versionMatch ? Number(versionMatch[1]) : 130;
-    const majorRan = Math.max(100, realMajor - ri(0, 4));
+    const versionMatch = (IS_FIREFOX ? /Firefox\/(\d+)/ : /Chrome\/(\d+)/).exec(realUA || '');
+    const realMajor = versionMatch ? Number(versionMatch[1]) : (IS_FIREFOX ? 145 : 130);
+    const majorRan = Math.max(IS_FIREFOX ? 128 : 100, realMajor - ri(0, IS_FIREFOX ? 3 : 4));
     const major = locks.ua && locks.ua.major ? Number(locks.ua.major) : majorRan;
 
     // A locked UA, screen or GPU pins the platform, so the rest of the values
@@ -314,7 +328,7 @@ var __scrambiliniBuildProfile = (function () {
       system = SYSTEMS.find((s) => s.id === pinned) || system;
     }
 
-    const ua = system.ua.replace('{v}', String(major));
+    const ua = (IS_FIREFOX ? system.firefoxUa : system.ua).replace(/\{v\}/g, String(major));
     const platformVersion = pick(system.platformVersions);
 
     const brands = [
@@ -399,6 +413,10 @@ var __scrambiliniBuildProfile = (function () {
     const coresRan = pick(CORES);
     const memoryRan = pick(MEMORY);
 
+    // Firefox reports a build id in the same shape as its release builds.
+    const buildID = `2026${String(ri(1, 12)).padStart(2, '0')}${String(ri(1, 28)).padStart(2, '0')}` +
+      `${String(ri(0, 23)).padStart(2, '0')}0000`;
+
     // Speech voices: thin the platform catalog down per seed, and put a voice
     // that speaks the identity's language first.
     const catalog = VOICES[system.id];
@@ -426,6 +444,21 @@ var __scrambiliniBuildProfile = (function () {
       ua,
       major,
       brands,
+      browser: BROWSER,
+      vendor: IS_FIREFOX ? '' : 'Google Inc.',
+      productSub: IS_FIREFOX ? '20100101' : '20030107',
+      appVersion: IS_FIREFOX ? system.appVersion : ua.replace(/^Mozilla\//, ''),
+      oscpu: IS_FIREFOX ? system.oscpu : null,
+      buildID: IS_FIREFOX ? buildID : null,
+      caps: {
+        userAgentData: !IS_FIREFOX,
+        deviceMemory: !IS_FIREFOX,
+        connection: !IS_FIREFOX,
+        battery: !IS_FIREFOX,
+        keyboard: !IS_FIREFOX,
+        plugins: !IS_FIREFOX,
+        pdfViewer: !IS_FIREFOX,
+      },
       system: system.id,
       platform: system.platform,
       uaPlatform: system.uaPlatform,
