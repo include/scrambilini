@@ -275,6 +275,5 @@ images/                  the artwork and the screenshots in this README
 test/                    Bun + Playwright harnesses (harness, probe, navtiming,
                          coherence, attributes, reseed, popup, locks,
                          persistence, amiunique, debug)
-data/                    the fingerprint this extension was modelled on
 dist/                    scrambilini-1.6.0.zip — ignored, built by make release
 ```
