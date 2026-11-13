@@ -30,7 +30,7 @@ help:
 	@echo "  make release   build, then write a SHA-256 next to the zip"
 	@echo "  make check     JS syntax, manifest and profile-builder checks"
 	@echo "  make install   bun install (test harnesses and icon tool)"
-	@echo "  make icons     rebuild icons/ from scrambilini.png"
+	@echo "  make icons     rebuild icons/ from images/scrambilini.png"
 	@echo "  make test      run the Playwright harnesses (needs a display)"
 	@echo "  make clean     remove the dist folder"
 	@echo ""

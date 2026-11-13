@@ -1,5 +1,5 @@
 /*
- * Build icons/icon{16,32,48,128}.png from the scrambilini.png artwork.
+ * Build icons/icon{16,32,48,128}.png from the images/scrambilini.png artwork.
  *
  * The full composition works at 128 px; at 48 px and below the head crop keeps
  * the character readable.
@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 
 const ROOT = join(import.meta.dir, '..');
-const SOURCE = join(ROOT, 'scrambilini.png');
+const SOURCE = join(ROOT, 'images', 'scrambilini.png');
 
 // Square crops of the artwork, in source pixels.
 const FULL = { left: 67, top: 18, width: 777, height: 777 }; // the whole character
