@@ -92,6 +92,12 @@
     }
     dl.flash dd { animation: flash .7s ease-out; border-radius: 4px; }
     .hint { color: var(--muted); font-size: 11px; margin: 10px 0 0; }
+    .scope {
+      display: flex; align-items: center; gap: 6px; margin-top: 10px;
+      font-size: 12px; color: var(--muted); cursor: pointer; user-select: none;
+    }
+    .scope input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+    .scope:hover { color: var(--fg); }
   </style>
 </head>
 <body>
@@ -125,7 +131,11 @@
 
   <hr>
   <button id="reseed">New identity for this tab</button>
-  <p class="hint">Tick a row to keep that value when you scramble again. Every new tab starts unlocked. Click outside to close.</p>
+  <label class="scope">
+    <input type="checkbox" id="allTabs">
+    <span>Lock for all tabs</span>
+  </label>
+  <p class="hint">Tick a row to keep that value when you scramble again. With <em>Lock for all tabs</em> the pins are shared by every tab and kept after a restart.</p>
 
   <details>
     <summary>All attributes (<span id="allCount">0</span>)</summary>

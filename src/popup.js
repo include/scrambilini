@@ -19,7 +19,7 @@ function isExtensionPage(url) {
 function ask(tabId) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type: 'getProfile', tabId }, (response) => {
-      resolve(response || { payload: null, locks: {} });
+      resolve(response || { payload: null, locks: {}, allTabs: false });
     });
   });
 }
@@ -64,9 +64,10 @@ function renderDetails(payload) {
   $('allCount').textContent = String(details.length);
 }
 
-function render(payload, locks) {
+function render(payload, locks, allTabs) {
   renderLocks(locks);
   renderDetails(payload);
+  $('allTabs').checked = Boolean(allTabs);
   const dot = $('dot');
   if (!payload) {
     dot.classList.add('off');
@@ -85,9 +86,9 @@ function render(payload, locks) {
 
 (async () => {
   const tab = await activeTab();
-  if (!tab) return render(null, null);
+  if (!tab) return render(null, null, false);
   const state = await ask(tab.id);
-  render(state.payload, state.locks);
+  render(state.payload, state.locks, state.allTabs);
 
   const button = $('reseed');
   button.addEventListener('click', async () => {
@@ -103,12 +104,12 @@ function render(payload, locks) {
       button.textContent = 'New identity for this tab';
 
       if (response && response.payload) {
-        render(response.payload, response.locks);
+        render(response.payload, response.locks, response.allTabs);
         flash();
         return;
       }
       ask(t.id).then((state) => {
-        render(state.payload, state.locks);
+        render(state.payload, state.locks, state.allTabs);
         flash();
       });
     });
@@ -122,12 +123,24 @@ function render(payload, locks) {
         return;
       }
       chrome.runtime.sendMessage(
-        { type: 'lock', tabId: t.id, field: box.dataset.field, locked: box.checked },
+        { type: 'lock', tabId: t.id, field: box.dataset.field, locked: box.checked, allTabs: $('allTabs').checked },
         (response) => {
           if (!response) return;
-          render(response.payload, response.locks);
+          render(response.payload, response.locks, response.allTabs);
         },
       );
     });
+  });
+
+  $('allTabs').addEventListener('change', async () => {
+    const t = await activeTab();
+    if (!t) return;
+    chrome.runtime.sendMessage(
+      { type: 'lockScope', tabId: t.id, allTabs: $('allTabs').checked },
+      (response) => {
+        if (!response) return;
+        render(response.payload, response.locks, response.allTabs);
+      },
+    );
   });
 })();

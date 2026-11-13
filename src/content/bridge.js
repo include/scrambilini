@@ -19,6 +19,7 @@
   const HEADER_KEY = '__scrambilini_headers';
   const STORAGE_PREFIX = 'tab:';
   const LOCKS_PREFIX = 'locks:';
+  const GLOBAL_LOCKS_KEY = 'locks:global';
   let lastSent = null;
   let started = false;
   let authoritative = null;
@@ -71,19 +72,27 @@
     } catch (e) { /* ignore */ }
   }
 
-  /** The seed and locks the worker stored for this tab, read without waking it. */
+  /** The seed and effective locks for this tab, read without waking the worker. */
   async function stateFromStorage() {
     try {
-      // Both calls go to the browser process, so they run at the same time
-      // instead of one after the other.
-      const [tab, data] = await Promise.all([
+      // All three calls go to the browser process, so they run at the same
+      // time instead of one after the other.
+      const [tab, session, local] = await Promise.all([
         chrome.tabs.getCurrent(),
         chrome.storage.session.get(null),
+        chrome.storage.local.get(GLOBAL_LOCKS_KEY),
       ]);
-      if (!tab || typeof tab.id !== 'number' || !data) return null;
-      const seed = data[STORAGE_PREFIX + tab.id];
+      if (!tab || typeof tab.id !== 'number' || !session) return null;
+      const seed = session[STORAGE_PREFIX + tab.id];
       if (!seed) return null;
-      return { seed, locks: data[LOCKS_PREFIX + tab.id] || null };
+      const tabLocks = session[LOCKS_PREFIX + tab.id] || {};
+      const globalLocks = (local && local[GLOBAL_LOCKS_KEY]) || {};
+      const locks = Object.assign({}, globalLocks);
+      for (const [field, value] of Object.entries(tabLocks)) {
+        if (value === null) delete locks[field];
+        else locks[field] = value;
+      }
+      return { seed, locks: Object.keys(locks).length ? locks : null };
     } catch (e) {
       return null;
     }

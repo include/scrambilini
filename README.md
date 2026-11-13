@@ -115,13 +115,18 @@ canvas/audio noise changes as usual.
   tab already has.
 - Unticking lets the seed decide that value again, so it can change at that
   moment. The popup and the page stay in step either way.
-- Locks belong to the tab. A new tab starts with everything unlocked, and a
-  reload keeps both the seed and the locks.
+- **Lock for all tabs** shares the pins with every tab and keeps them after a
+  browser restart. Tick it once and the language you pinned stays pinned
+  everywhere; untick a row in a single tab to opt that tab out without touching
+  the others.
+- Without that toggle, locks belong to the tab: a new tab starts unlocked, and
+  the locks are forgotten when the tab closes.
 - A locked screen or GPU also pins the platform that owns it (macOS, Windows or
   Linux), so you do not end up with a Mac screen on a Windows user agent.
-- The locks live in `chrome.storage.session` under `locks:<tabId>` and are
-  applied by the same profile builder both sides use, so the headers follow the
-  locks too.
+- Shared locks live in `chrome.storage.local` under `locks:global`; per-tab
+  locks and per-tab opt-outs live in `chrome.storage.session` under
+  `locks:<tabId>`. Both are applied by the same profile builder, so the headers
+  follow the locks too.
 
 ## How the values are chosen
 
@@ -189,6 +194,7 @@ bun run test/attributes.ts    # locale, speech voices and keyboard follow the id
 bun run test/reseed.ts        # reload keeps the identity, reseed changes it
 bun run test/popup.ts         # the popup rolls and stays open
 bun run test/locks.ts         # tick boxes survive a scramble and a reload
+bun run test/persistence.ts   # "Lock for all tabs" survives new tabs and restarts
 bun run test/amiunique.ts 3   # three tabs on amiunique.org
 
 # or everything in order
@@ -262,5 +268,5 @@ test/                    Bun + Playwright harnesses (harness, probe, navtiming,
                          coherence, attributes, reseed, popup, locks, amiunique,
                          debug)
 data/                    the fingerprint this extension was modelled on
-dist/                    scrambilini-1.5.0.zip — ignored, built by make release
+dist/                    scrambilini-1.6.0.zip — ignored, built by make release
 ```

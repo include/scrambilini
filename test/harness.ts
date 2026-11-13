@@ -50,16 +50,19 @@ export function serve(): void {
   server.unref();
 }
 
-export async function launch(): Promise<BrowserContext> {
-  return chromium.launchPersistentContext(mkdtempSync(join(tmpdir(), 'scrambilini-')), {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${ROOT}`,
-      `--load-extension=${ROOT}`,
-      '--no-first-run',
-      '--no-default-browser-check',
-    ],
-  });
+export async function launch(userDataDir?: string): Promise<BrowserContext> {
+  return chromium.launchPersistentContext(
+    userDataDir ?? mkdtempSync(join(tmpdir(), 'scrambilini-')),
+    {
+      headless: false,
+      args: [
+        `--disable-extensions-except=${ROOT}`,
+        `--load-extension=${ROOT}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+      ],
+    },
+  );
 }
 
 /** Opens and closes a tab so the service worker is awake before measuring. */

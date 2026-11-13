@@ -11,6 +11,8 @@ importScripts('shared/profile.js');
 const RULE_BASE = 900000;
 const STORAGE_PREFIX = 'tab:';
 const LOCKS_PREFIX = 'locks:';
+const GLOBAL_LOCKS_KEY = 'locks:global';
+const ALL_TABS_KEY = 'locks:allTabs';
 
 // Content scripts read this tab's seed straight out of session storage, which
 // is much quicker than waking the worker up. Session storage is closed to
@@ -149,7 +151,7 @@ async function writeSeed(tabId, seed) {
   } catch (e) { /* ignore */ }
 }
 
-async function readLocks(tabId) {
+async function readTabLocks(tabId) {
   try {
     const key = LOCKS_PREFIX + tabId;
     const stored = await chrome.storage.session.get(key);
@@ -159,7 +161,7 @@ async function readLocks(tabId) {
   }
 }
 
-async function writeLocks(tabId, locks) {
+async function writeTabLocks(tabId, locks) {
   const key = LOCKS_PREFIX + tabId;
   try {
     if (locks && Object.keys(locks).length) {
@@ -168,6 +170,51 @@ async function writeLocks(tabId, locks) {
       await chrome.storage.session.remove(key);
     }
   } catch (e) { /* ignore */ }
+}
+
+/** Locks shared by every tab, kept in local storage so they survive restarts. */
+async function readGlobalLocks() {
+  try {
+    const stored = await chrome.storage.local.get(GLOBAL_LOCKS_KEY);
+    return (stored && stored[GLOBAL_LOCKS_KEY]) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+async function writeGlobalLocks(locks) {
+  try {
+    if (locks && Object.keys(locks).length) {
+      await chrome.storage.local.set({ [GLOBAL_LOCKS_KEY]: locks });
+    } else {
+      await chrome.storage.local.remove(GLOBAL_LOCKS_KEY);
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function readAllTabsPref() {
+  try {
+    const stored = await chrome.storage.local.get(ALL_TABS_KEY);
+    return Boolean(stored && stored[ALL_TABS_KEY]);
+  } catch (e) {
+    return false;
+  }
+}
+
+/** Global locks, overridden by this tab's own locks (null means unlocked here). */
+function mergeLocks(globalLocks, tabLocks) {
+  const out = Object.assign({}, globalLocks || {});
+  for (const [field, value] of Object.entries(tabLocks || {})) {
+    if (value === null) delete out[field];
+    else out[field] = value;
+  }
+  return out;
+}
+
+async function readLocks(tabId) {
+  const [globalLocks, tabLocks] = await Promise.all([readGlobalLocks(), readTabLocks(tabId)]);
+  const merged = mergeLocks(globalLocks, tabLocks);
+  return Object.keys(merged).length ? merged : null;
 }
 
 /** The part of a profile that a lock stands for. */
@@ -286,12 +333,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (typeof message.tabId !== 'number') return;
     (async () => {
       const seed = await currentSeed(message.tabId);
-      const locks = await readLocks(message.tabId);
+      const [locks, allTabs] = await Promise.all([readLocks(message.tabId), readAllTabsPref()]);
       sendResponse({
         payload: seed ? profileForSeed(seed, locks) : null,
         locks: locks || {},
+        allTabs,
       });
-    })().catch(() => sendResponse({ payload: null, locks: {} }));
+    })().catch(() => sendResponse({ payload: null, locks: {}, allTabs: false }));
     return true;
   }
 
@@ -300,23 +348,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (typeof tabId !== 'number' || !message.field) return;
     (async () => {
       const seed = await ensureTabSeed(tabId);
-      const locks = (await readLocks(tabId)) || {};
+      const [globalLocks, tabLocksStored] = await Promise.all([readGlobalLocks(), readTabLocks(tabId)]);
+      const tabLocks = Object.assign({}, tabLocksStored || {});
+      const effective = mergeLocks(globalLocks, tabLocks);
+      const allTabs = Boolean(message.allTabs);
+
       if (message.locked) {
-        const value = lockValue(seed, locks, message.field);
-        delete locks[message.field];
-        if (value !== null) locks[message.field] = value;
+        const value = lockValue(seed, effective, message.field);
+        if (value !== null) {
+          tabLocks[message.field] = value;
+          if (allTabs) globalLocks[message.field] = value;
+        }
       } else {
-        delete locks[message.field];
+        if (allTabs) delete globalLocks[message.field];
+        // With a global lock in place, unlocking here is a per-tab override.
+        if (message.field in globalLocks) tabLocks[message.field] = null;
+        else delete tabLocks[message.field];
       }
-      await writeLocks(tabId, locks);
+
+      await Promise.all([writeGlobalLocks(globalLocks), writeTabLocks(tabId, tabLocks)]);
+      const locks = mergeLocks(globalLocks, tabLocks);
       // The identity is exactly build(seed, locks), so the page has to rebuild
       // when the lock set changes — otherwise the popup and the page would
       // disagree the moment a lock is removed.
       try {
         await chrome.tabs.sendMessage(tabId, { type: 'reseed', seed, locks });
       } catch (e) { /* tab may not have a content script */ }
-      sendResponse({ payload: profileForSeed(seed, locks), locks });
-    })().catch(() => sendResponse({ payload: null, locks: {} }));
+      sendResponse({ payload: profileForSeed(seed, locks), locks, allTabs });
+    })().catch(() => sendResponse({ payload: null, locks: {}, allTabs: false }));
+    return true;
+  }
+
+  if (message.type === 'lockScope') {
+    const tabId = message.tabId;
+    if (typeof tabId !== 'number') return;
+    (async () => {
+      const allTabs = Boolean(message.allTabs);
+      await chrome.storage.local.set({ [ALL_TABS_KEY]: allTabs });
+      const seed = await ensureTabSeed(tabId);
+      if (allTabs) {
+        // Promote what this tab already locks, so ticking the box keeps the
+        // pins you already made instead of making you repeat them.
+        const effective = (await readLocks(tabId)) || {};
+        const globalLocks = Object.assign({}, await readGlobalLocks(), effective);
+        await writeGlobalLocks(globalLocks);
+      }
+      const locks = (await readLocks(tabId)) || {};
+      sendResponse({ payload: profileForSeed(seed, locks), locks, allTabs });
+    })().catch(() => sendResponse({ payload: null, locks: {}, allTabs: false }));
     return true;
   }
 
@@ -346,11 +425,15 @@ chrome.tabs.onCreated.addListener((tab) => {
   if (!seeds.has(tab.id)) {
     const seed = randomSeed();
     seeds.set(tab.id, seed);
-    const profile = profileForSeed(seed, null);
-    enqueue(tab.id, () => Promise.all([
-      writeSeed(tab.id, seed),
-      applyHeaders(tab.id, profile),
-    ]));
+    enqueue(tab.id, async () => {
+      // Global locks apply to a brand new tab as well, so the very first
+      // navigation already carries them.
+      const locks = await readLocks(tab.id);
+      await Promise.all([
+        writeSeed(tab.id, seed),
+        applyHeaders(tab.id, profileForSeed(seed, locks)),
+      ]);
+    });
     return;
   }
   ensureTabSeed(tab.id);
