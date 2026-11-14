@@ -40,11 +40,15 @@ page reads describe the same machine.
 
 <p align="center">
   <img src="images/scrambilini-rand.png" width="250" alt="A fresh identity in the popup">
-  <img src="images/scrambilini-attributes.png" width="250" alt="The full attribute list">
-  <img src="images/scrambilini-lang-lock.png" width="250" alt="The language pinned for all tabs">
+  <img src="images/scrambilini-lang-lock.png" width="250" alt="A language pinned for all tabs">
 </p>
 
-<p align="center"><sub>a fresh identity · the full attribute list · a language pinned for all tabs</sub></p>
+<p align="center">
+  <img src="images/scrambilini-attributes.png" width="250" alt="The full attribute list">
+  <img src="images/scrambilini-exceptions.png" width="250" alt="Per-site exceptions">
+</p>
+
+<p align="center"><sub>a fresh identity · a language pinned for all tabs · the full attribute list · per-site exceptions</sub></p>
 
 ## How it works
 

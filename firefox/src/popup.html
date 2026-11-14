@@ -27,11 +27,12 @@
       background: var(--bg);
       color: var(--fg);
     }
-    .slider { overflow: hidden; }
+    .slider { overflow: clip; }
     .views {
       display: flex;
+      align-items: flex-start;
       width: 200%;
-      transition: transform .22s ease;
+      transition: transform .22s ease, height .22s ease;
     }
     .views.show-exceptions { transform: translateX(-50%); }
     .view { width: 50%; flex: 0 0 50%; min-width: 0; }

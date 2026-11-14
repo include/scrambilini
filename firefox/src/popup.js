@@ -52,6 +52,13 @@ function sendSettings(patch) {
   });
 }
 
+function syncHeight() {
+  const views = $('views');
+  const exceptionsOpen = views.classList.contains('show-exceptions');
+  const active = exceptionsOpen ? $('exceptionsView') : views.querySelector('.view');
+  if (active) views.style.height = `${active.offsetHeight}px`;
+}
+
 function flash() {
   const facts = $('facts');
   facts.classList.remove('flash');
@@ -148,6 +155,7 @@ function render() {
   setValue('langs', (payload.languages || []).join(', '));
   setValue('hw', `${payload.cores} cores · ${payload.memory} GB`);
   setValue('gpu', payload.gpu);
+  syncHeight();
 }
 
 async function applySettings(patch, rerender = true) {
@@ -197,8 +205,15 @@ function removeException(entry) {
   render();
 
   $('enabled').addEventListener('change', () => applySettings({ enabled: $('enabled').checked }));
-  $('openExceptions').addEventListener('click', () => $('views').classList.add('show-exceptions'));
-  $('back').addEventListener('click', () => $('views').classList.remove('show-exceptions'));
+  $('openExceptions').addEventListener('click', () => {
+    $('views').classList.add('show-exceptions');
+    syncHeight();
+  });
+  $('back').addEventListener('click', () => {
+    $('views').classList.remove('show-exceptions');
+    syncHeight();
+  });
+  document.querySelector('details').addEventListener('toggle', syncHeight);
 
   $('addForm').addEventListener('submit', (event) => {
     event.preventDefault();
