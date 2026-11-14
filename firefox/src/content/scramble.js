@@ -27,6 +27,7 @@
   };
 
   const SEED_KEY = '__scrambilini_seed';
+  const REAL_UA_KEY = '__scrambilini_real_ua';
   const LOCKS_KEY = '__scrambilini_locks';
   const HEADER_KEY = '__scrambilini_headers';
   const MAX_NOISE_PIXELS = 4_000_000;
@@ -893,13 +894,24 @@
   publish();
 
   // Adopt the tab's authoritative seed once the service worker hands it over.
+  /** The browser's real UA. Firefox shares `navigator` between documents in a
+   *  tab, so the page's own copy may already be spoofed; the worker sends the
+   *  real one along with the seed. */
+  function realUaForProfile() {
+    try {
+      return sessionStorage.getItem(REAL_UA_KEY) || realUA;
+    } catch (e) {
+      return realUA;
+    }
+  }
+
   function adoptSeed(nextSeed, nextLocks) {
     if (!nextSeed || typeof nextSeed !== 'string') return;
     const nextKey = JSON.stringify(nextLocks || null);
     if (nextSeed === P.seed && nextKey === JSON.stringify(locks || null)) return;
     seed = nextSeed;
     locks = nextLocks || null;
-    Object.assign(P, buildProfile(nextSeed, realUA, locks));
+    Object.assign(P, buildProfile(nextSeed, realUaForProfile(), locks));
     applyGeometry();
     persistSeed();
     publish();

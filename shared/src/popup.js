@@ -2,6 +2,16 @@ const $ = (id) => document.getElementById(id);
 
 const LOCKABLE = ['ua', 'screen', 'timezone', 'languages', 'hardware', 'gpu'];
 
+const state = {
+  tabId: null,
+  host: '',
+  payload: null,
+  locks: {},
+  allTabs: false,
+  enabled: true,
+  exceptions: [],
+};
+
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab && !isExtensionPage(tab.url)) return tab;
@@ -16,10 +26,28 @@ function isExtensionPage(url) {
   return !url || url.startsWith('chrome-extension://') || url.startsWith('devtools://');
 }
 
+function hostOf(url) {
+  try {
+    return new URL(url).hostname;
+  } catch (e) {
+    return '';
+  }
+}
+
 function ask(tabId) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type: 'getProfile', tabId }, (response) => {
-      resolve(response || { payload: null, locks: {}, allTabs: false });
+      resolve(response || {
+        payload: null, locks: {}, allTabs: false, enabled: true, exceptions: [],
+      });
+    });
+  });
+}
+
+function sendSettings(patch) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'settings', ...patch }, (response) => {
+      resolve(response);
     });
   });
 }
@@ -43,12 +71,6 @@ function renderLocks(locks) {
   }
 }
 
-function setValue(id, value) {
-  const el = $(id);
-  el.textContent = value;
-  el.title = value;
-}
-
 function renderDetails(payload) {
   const list = $('all');
   list.replaceChildren();
@@ -64,17 +86,61 @@ function renderDetails(payload) {
   $('allCount').textContent = String(details.length);
 }
 
-function render(payload, locks, allTabs) {
+function setValue(id, value) {
+  const el = $(id);
+  el.textContent = value;
+  el.title = value;
+}
+
+function renderExceptionList() {
+  const list = $('exceptionList');
+  list.replaceChildren();
+  if (!state.exceptions.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'No exceptions yet.';
+    list.append(li);
+    return;
+  }
+  for (const entry of state.exceptions) {
+    const li = document.createElement('li');
+    const domain = document.createElement('span');
+    domain.className = 'domain';
+    domain.textContent = entry;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'remove';
+    remove.textContent = '✕';
+    remove.title = `Remove ${entry}`;
+    remove.addEventListener('click', () => removeException(entry));
+    li.append(domain, remove);
+    list.append(li);
+  }
+}
+
+function render() {
+  const { payload, locks, enabled, exceptions } = state;
+  const excepted = enabled && __scrambiliniMatcher.matchesHost(state.host, exceptions);
+
+  document.body.classList.toggle('off', !enabled);
+  document.body.classList.toggle('excepted', excepted);
+  $('enabled').checked = enabled;
+  $('offNotice').hidden = enabled;
+  $('exceptionNotice').hidden = !excepted;
+  $('dot').classList.toggle('off', !enabled || excepted);
+  $('reseed').disabled = !enabled || excepted;
+  $('exCount').textContent = String(exceptions.length);
+  $('scopeHint').hidden = state.allTabs || !locks || Object.keys(locks).length === 0;
+
+  renderExceptionList();
   renderLocks(locks);
   renderDetails(payload);
-  $('allTabs').checked = Boolean(allTabs);
-  const dot = $('dot');
+  $('allTabs').checked = Boolean(state.allTabs);
+
   if (!payload) {
-    dot.classList.add('off');
     $('seed').textContent = 'not active on this page';
     return;
   }
-  dot.classList.remove('off');
   setValue('seed', payload.seed.slice(0, 24));
   setValue('ua', payload.ua);
   setValue('screen', payload.screen);
@@ -84,11 +150,62 @@ function render(payload, locks, allTabs) {
   setValue('gpu', payload.gpu);
 }
 
+async function applySettings(patch, rerender = true) {
+  const response = await sendSettings(patch);
+  if (!response) {
+    // The worker did not answer; fall back to what it actually stored.
+    if (state.tabId !== null) {
+      const fresh = await ask(state.tabId);
+      state.enabled = fresh.enabled !== false;
+      state.exceptions = fresh.exceptions || [];
+      render();
+    }
+    return;
+  }
+  state.enabled = response.enabled;
+  state.exceptions = response.exceptions;
+  if (rerender) render();
+}
+
+function addException(value) {
+  const entry = __scrambiliniMatcher.normalize(value);
+  if (!entry) return;
+  // Show it right away; the worker confirms afterwards.
+  state.exceptions = Array.from(new Set([...state.exceptions, entry])).sort();
+  render();
+  applySettings({ exceptions: state.exceptions }, false);
+}
+
+function removeException(entry) {
+  state.exceptions = state.exceptions.filter((item) => item !== entry);
+  render();
+  applySettings({ exceptions: state.exceptions }, false);
+}
+
 (async () => {
   const tab = await activeTab();
-  if (!tab) return render(null, null, false);
-  const state = await ask(tab.id);
-  render(state.payload, state.locks, state.allTabs);
+  if (!tab) return;
+  state.tabId = tab.id;
+  state.host = hostOf(tab.url);
+
+  const response = await ask(tab.id);
+  state.payload = response.payload;
+  state.locks = response.locks || {};
+  state.allTabs = Boolean(response.allTabs);
+  state.enabled = response.enabled !== false;
+  state.exceptions = response.exceptions || [];
+  render();
+
+  $('enabled').addEventListener('change', () => applySettings({ enabled: $('enabled').checked }));
+  $('openExceptions').addEventListener('click', () => $('views').classList.add('show-exceptions'));
+  $('back').addEventListener('click', () => $('views').classList.remove('show-exceptions'));
+
+  $('addForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const value = $('entry').value;
+    $('entry').value = '';
+    addException(value);
+  });
 
   const button = $('reseed');
   button.addEventListener('click', async () => {
@@ -99,17 +216,21 @@ function render(payload, locks, allTabs) {
     button.disabled = true;
     button.textContent = 'Rolling a new identity…';
 
-    chrome.runtime.sendMessage({ type: 'reseed', tabId: t.id }, (response) => {
+    chrome.runtime.sendMessage({ type: 'reseed', tabId: t.id }, (reply) => {
       button.disabled = false;
       button.textContent = 'New identity for this tab';
 
-      if (response && response.payload) {
-        render(response.payload, response.locks, response.allTabs);
+      if (reply && reply.payload) {
+        state.payload = reply.payload;
+        state.locks = reply.locks || {};
+        render();
         flash();
         return;
       }
-      ask(t.id).then((state) => {
-        render(state.payload, state.locks, state.allTabs);
+      ask(t.id).then((next) => {
+        state.payload = next.payload;
+        state.locks = next.locks || {};
+        render();
         flash();
       });
     });
@@ -124,9 +245,12 @@ function render(payload, locks, allTabs) {
       }
       chrome.runtime.sendMessage(
         { type: 'lock', tabId: t.id, field: box.dataset.field, locked: box.checked, allTabs: $('allTabs').checked },
-        (response) => {
-          if (!response) return;
-          render(response.payload, response.locks, response.allTabs);
+        (reply) => {
+          if (!reply) return;
+          state.payload = reply.payload;
+          state.locks = reply.locks || {};
+          state.allTabs = Boolean(reply.allTabs);
+          render();
         },
       );
     });
@@ -137,9 +261,12 @@ function render(payload, locks, allTabs) {
     if (!t) return;
     chrome.runtime.sendMessage(
       { type: 'lockScope', tabId: t.id, allTabs: $('allTabs').checked },
-      (response) => {
-        if (!response) return;
-        render(response.payload, response.locks, response.allTabs);
+      (reply) => {
+        if (!reply) return;
+        state.payload = reply.payload;
+        state.locks = reply.locks || {};
+        state.allTabs = Boolean(reply.allTabs);
+        render();
       },
     );
   });

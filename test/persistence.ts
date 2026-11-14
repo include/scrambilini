@@ -58,9 +58,8 @@ await warm(ctx);
 
 const first = await probeLanguages(ctx);
 const popup = await extensionPage(ctx);
+// Locks are shared by default; no need to turn anything on.
 await popup.click('.lock[data-field="languages"]');
-await popup.waitForTimeout(250);
-await popup.click('#allTabs');
 await popup.waitForTimeout(400);
 const shared = await popupState(popup);
 const second = await probeLanguages(ctx);
@@ -106,7 +105,7 @@ console.log('restored     :', JSON.stringify(restored));
 check('the lock is shared with new tabs', second.langs.join(', ') === shared.langs);
 check('the new tab still has its own identity', second.seed !== first.seed);
 check('the lock survives a browser restart', third.langs.join(', ') === shared.langs);
-check('the toggle is restored', restored.allTabs === true);
+check('the shared-by-default switch is on', restored.allTabs === true);
 check('the shared lock is visible after restart', restored.locks.includes('languages'));
 check('the worker reports the lock for the tab', Boolean(profile && profile.locks && profile.locks.languages));
 check('unlocking here clears the tick', unlocked.locks.length === 0);

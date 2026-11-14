@@ -9,7 +9,7 @@
 // Chrome loads the worker with importScripts; Firefox's event page gets these
 // files from background.scripts in the manifest instead.
 if (typeof importScripts === 'function') {
-  importScripts('shared/browser.js', 'shared/profile.js');
+  importScripts('shared/browser.js', 'shared/profile.js', 'shared/matcher.js');
 }
 
 const BROWSER = typeof __scrambiliniBrowser !== 'undefined' ? __scrambiliniBrowser : 'chrome';
@@ -19,6 +19,10 @@ const STORAGE_PREFIX = 'tab:';
 const LOCKS_PREFIX = 'locks:';
 const GLOBAL_LOCKS_KEY = 'locks:global';
 const ALL_TABS_KEY = 'locks:allTabs';
+const SETTINGS_KEY = 'settings';
+
+/** enabled + exceptions, mirrored from storage.local. */
+let settingsCache = null;
 
 // Content scripts read this tab's seed straight out of session storage, which
 // is much quicker than waking the worker up. Session storage is closed to
@@ -54,7 +58,29 @@ function enqueue(tabId, task) {
   return next;
 }
 
-function buildRule(tabId, profile) {
+async function readSettings() {
+  if (settingsCache) return settingsCache;
+  let stored = null;
+  try {
+    const data = await chrome.storage.local.get(SETTINGS_KEY);
+    stored = data && data[SETTINGS_KEY];
+  } catch (e) { /* ignore */ }
+  settingsCache = {
+    enabled: stored && stored.enabled === false ? false : true,
+    exceptions: Array.isArray(stored && stored.exceptions) ? stored.exceptions : [],
+  };
+  return settingsCache;
+}
+
+function writeSettings(next) {
+  settingsCache = {
+    enabled: next.enabled !== false,
+    exceptions: Array.isArray(next.exceptions) ? next.exceptions : [],
+  };
+  return chrome.storage.local.set({ [SETTINGS_KEY]: settingsCache });
+}
+
+function buildRule(tabId, profile, settings) {
   const requestHeaders = [
     { header: 'user-agent', operation: 'set', value: profile.ua },
     { header: 'accept-language', operation: 'set', value: profile.acceptLanguage },
@@ -75,18 +101,31 @@ function buildRule(tabId, profile) {
     requestHeaders.push({ header: 'dnt', operation: 'remove' });
   }
 
+  const condition = {
+    tabIds: [tabId],
+    resourceTypes: [
+      'main_frame', 'sub_frame', 'stylesheet', 'script', 'image',
+      'font', 'object', 'xmlhttprequest', 'ping', 'media', 'websocket',
+      'other',
+    ],
+  };
+
+  // An excepted site keeps its real identity: no spoofed headers on requests
+  // from it, and none on requests to it.
+  const exceptions = (settings && settings.exceptions) || [];
+  if (exceptions.length) {
+    const domains = __scrambiliniMatcher.toDnrDomains(exceptions);
+    if (domains.length) {
+      condition.excludedRequestDomains = domains;
+      condition.excludedInitiatorDomains = domains;
+    }
+  }
+
   return {
     id: ruleIdFor(tabId),
     priority: 1,
     action: { type: 'modifyHeaders', requestHeaders },
-    condition: {
-      tabIds: [tabId],
-      resourceTypes: [
-        'main_frame', 'sub_frame', 'stylesheet', 'script', 'image',
-        'font', 'object', 'xmlhttprequest', 'ping', 'media', 'websocket',
-        'other',
-      ],
-    },
+    condition,
   };
 }
 
@@ -209,9 +248,11 @@ async function writeGlobalLocks(locks) {
 async function readAllTabsPref() {
   try {
     const stored = await chrome.storage.local.get(ALL_TABS_KEY);
-    return Boolean(stored && stored[ALL_TABS_KEY]);
+    // Locks are shared by default; untick the switch to keep them per tab.
+    if (stored && typeof stored[ALL_TABS_KEY] === 'boolean') return stored[ALL_TABS_KEY];
+    return true;
   } catch (e) {
-    return false;
+    return true;
   }
 }
 
@@ -247,13 +288,66 @@ function lockValue(seed, locks, field) {
 
 async function applyHeaders(tabId, profile) {
   applied.add(tabId);
+  const settings = await readSettings();
   try {
+    if (!settings.enabled) {
+      await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleIdFor(tabId)] });
+      return;
+    }
     await chrome.declarativeNetRequest.updateSessionRules({
       removeRuleIds: [ruleIdFor(tabId)],
-      addRules: [buildRule(tabId, profile)],
+      addRules: [buildRule(tabId, profile, settings)],
     });
   } catch (error) {
     console.warn('[scrambilini] could not install header rules for tab', tabId, error);
+  }
+}
+
+/**
+ * Content scripts are registered here rather than in the manifest, because the
+ * exception list has to become excludeMatches: an excepted site must not even
+ * get the scripts that patch its APIs.
+ */
+async function syncContentScripts() {
+  const settings = await readSettings();
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts();
+    if (existing.length) {
+      await chrome.scripting.unregisterContentScripts({ ids: existing.map((script) => script.id) });
+    }
+    // The bridge runs everywhere, even when scrambling is off: it is what
+    // removes a seed left behind by a previous visit to an excepted origin.
+    const scripts = [
+      {
+        id: 'scrambilini-bridge',
+        js: ['src/shared/matcher.js', 'src/content/bridge.js'],
+        matches: ['<all_urls>'],
+        runAt: 'document_start',
+        allFrames: true,
+        matchOriginAsFallback: true,
+        persistAcrossSessions: true,
+      },
+    ];
+    if (settings.enabled) {
+      scripts.push({
+        id: 'scrambilini-main',
+        js: [
+          'src/shared/browser.js',
+          'src/shared/profile.js',
+          'src/content/scramble.js',
+        ],
+        matches: ['<all_urls>'],
+        excludeMatches: __scrambiliniMatcher.toMatchPatterns(settings.exceptions),
+        runAt: 'document_start',
+        allFrames: true,
+        matchOriginAsFallback: true,
+        world: 'MAIN',
+        persistAcrossSessions: true,
+      });
+    }
+    await chrome.scripting.registerContentScripts(scripts);
+  } catch (error) {
+    console.warn('[scrambilini] could not register content scripts', error);
   }
 }
 
@@ -327,7 +421,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (typeof tabId !== 'number') return;
     (async () => {
       const seed = await currentSeed(tabId);
-      sendResponse({ seed, locks: seed ? await readLocks(tabId) : null });
+      sendResponse({ seed, locks: seed ? await readLocks(tabId) : null, realUa: self.navigator.userAgent });
     })().catch(() => sendResponse({ seed: null, locks: null }));
     return true;
   }
@@ -357,13 +451,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (typeof message.tabId !== 'number') return;
     (async () => {
       const seed = await currentSeed(message.tabId);
-      const [locks, allTabs] = await Promise.all([readLocks(message.tabId), readAllTabsPref()]);
+      const [locks, allTabs, settings] = await Promise.all([
+        readLocks(message.tabId),
+        readAllTabsPref(),
+        readSettings(),
+      ]);
       sendResponse({
         payload: seed ? profileForSeed(seed, locks) : null,
         locks: locks || {},
         allTabs,
+        enabled: settings.enabled,
+        exceptions: settings.exceptions,
       });
     })().catch(() => sendResponse({ payload: null, locks: {}, allTabs: false }));
+    return true;
+  }
+
+  if (message.type === 'settings') {
+    (async () => {
+      const before = await readSettings();
+      const next = {
+        enabled: typeof message.enabled === 'boolean' ? message.enabled : before.enabled,
+        exceptions: Array.isArray(message.exceptions) ? message.exceptions : before.exceptions,
+      };
+      await writeSettings(next);
+      await syncContentScripts();
+      await reapplyRules();
+      // Answer before reloading tabs: a slow page load must not hold the popup.
+      sendResponse({ enabled: next.enabled, exceptions: next.exceptions });
+      reloadAffected(before, next).catch(() => {});
+    })().catch(() => sendResponse(null));
     return true;
   }
 
@@ -396,7 +513,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // when the lock set changes — otherwise the popup and the page would
       // disagree the moment a lock is removed.
       try {
-        await chrome.tabs.sendMessage(tabId, { type: 'reseed', seed, locks });
+        await chrome.tabs.sendMessage(tabId, {
+          type: 'reseed', seed, locks, realUa: self.navigator.userAgent,
+        });
       } catch (e) { /* tab may not have a content script */ }
       sendResponse({ payload: profileForSeed(seed, locks), locks, allTabs });
     })().catch(() => sendResponse({ payload: null, locks: {}, allTabs: false }));
@@ -434,7 +553,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const payload = profileForSeed(seed, locks);
       try {
         // The bridge swaps the page identity live; no reload needed.
-        await chrome.tabs.sendMessage(tabId, { type: 'reseed', seed, locks });
+        await chrome.tabs.sendMessage(tabId, {
+          type: 'reseed', seed, locks, realUa: self.navigator.userAgent,
+        });
       } catch (e) { /* tab may not have a content script */ }
       sendResponse({ payload, locks: locks || {} });
     })().catch(() => sendResponse({ payload: null, locks: {} }));
@@ -477,7 +598,46 @@ async function seedAllTabs() {
   } catch (e) { /* ignore */ }
 }
 
-chrome.runtime.onStartup.addListener(seedAllTabs);
+async function reapplyRules() {
+  const tabs = await chrome.tabs.query({});
+  for (const tab of tabs) {
+    if (typeof tab.id !== 'number') continue;
+    const seed = await readSeed(tab.id);
+    if (!seed) continue;
+    await applyHeaders(tab.id, profileForSeed(seed, await readLocks(tab.id)));
+  }
+}
+
+/** Reload the tabs whose identity just changed, and only those. */
+async function reloadAffected(before, after) {
+  const enabledChanged = before.enabled !== after.enabled;
+  const added = after.exceptions.filter((entry) => !before.exceptions.includes(entry));
+  const removed = before.exceptions.filter((entry) => !after.exceptions.includes(entry));
+  if (!enabledChanged && !added.length && !removed.length) return;
+
+  const tabs = await chrome.tabs.query({});
+  for (const tab of tabs) {
+    if (typeof tab.id !== 'number' || !tab.url || !/^https?:/i.test(tab.url)) continue;
+    let host = '';
+    try {
+      host = new URL(tab.url).hostname;
+    } catch (e) {
+      continue;
+    }
+    const affected = enabledChanged
+      || __scrambiliniMatcher.matchesHost(host, added)
+      || __scrambiliniMatcher.matchesHost(host, removed);
+    if (!affected) continue;
+    try {
+      await chrome.tabs.reload(tab.id);
+    } catch (e) { /* ignore */ }
+  }
+}
+
+chrome.runtime.onStartup.addListener(async () => {
+  await syncContentScripts();
+  await seedAllTabs();
+});
 
 chrome.runtime.onInstalled.addListener(async () => {
   // Session rules do not survive an extension reload, and the in-memory record
@@ -496,5 +656,6 @@ chrome.runtime.onInstalled.addListener(async () => {
       .map((rule) => rule.id);
     if (stale.length) await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: stale });
   } catch (e) { /* ignore */ }
+  await syncContentScripts();
   await seedAllTabs();
 });

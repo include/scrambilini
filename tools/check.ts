@@ -63,7 +63,7 @@ for (const browser of ['chrome', 'firefox']) {
   }
 }
 
-const JS_FILES = ['background.js', 'content/bridge.js', 'content/scramble.js', 'shared/profile.js', 'popup.js'];
+const JS_FILES = ['background.js', 'content/bridge.js', 'content/scramble.js', 'shared/profile.js', 'shared/matcher.js', 'popup.js'];
 for (const file of JS_FILES) {
   try {
     new Function(readFileSync(join(ROOT, 'shared', 'src', file), 'utf8'));
@@ -143,6 +143,34 @@ for (const browser of ['chrome', 'firefox'] as const) {
       problem(`${browser} ${i}: ${p.system} identity has WebGPU vendor ${p.webgpu.vendor}`);
     }
   }
+}
+
+// The exceptions matcher has to treat wildcards and exact hosts the way the
+// popup promises.
+const matcherModule = { exports: {} as any };
+new Function('module', 'exports', readFileSync(join(ROOT, 'shared', 'src', 'shared', 'matcher.js'), 'utf8'))(
+  matcherModule,
+  matcherModule.exports,
+);
+const matcher = matcherModule.exports as {
+  normalize: (entry: string) => string;
+  matchesHost: (host: string, entries: string[]) => boolean;
+};
+
+const matcherCases: Array<[string, boolean]> = [
+  ['gmail.com', true],
+  ['mail.gmail.com', true],
+  ['notgmail.com', false],
+  ['www.sapo.pt', true],
+  ['a.www.sapo.pt', false],
+];
+for (const [host, expected] of matcherCases) {
+  if (matcher.matchesHost(host, ['*.gmail.com', 'www.sapo.pt']) !== expected) {
+    problem(`matcher: ${host} should ${expected ? '' : 'not '}match`);
+  }
+}
+if (matcher.normalize('https://WWW.Sapo.pt/inbox?x=1') !== 'www.sapo.pt') {
+  problem('matcher: URL normalisation is wrong');
 }
 
 if (problems.length) process.exit(1);

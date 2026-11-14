@@ -10,6 +10,8 @@
  *    worker is asked in parallel and wins if the two ever disagree.
  * 2. Nudges the worker to (re)install the header rules whenever the page
  *    publishes a profile, which also covers a worker that restarted mid-tab.
+ * 3. On an excepted site (or when scrambling is off) it does nothing except
+ *    remove any seed left behind by a previous visit to that origin.
  */
 (() => {
   'use strict';
@@ -20,6 +22,8 @@
   const STORAGE_PREFIX = 'tab:';
   const LOCKS_PREFIX = 'locks:';
   const GLOBAL_LOCKS_KEY = 'locks:global';
+  const SETTINGS_KEY = 'settings';
+  const REAL_UA_KEY = '__scrambilini_real_ua';
   let lastSent = null;
   let started = false;
   let authoritative = null;
@@ -59,10 +63,14 @@
 
   /** Hand a seed and its locked fields to the page. sessionStorage is the only
    *  channel both worlds share synchronously. */
-  function publishSeed(seed, locks) {
+  function publishSeed(seed, locks, realUa) {
     if (!seed) return;
     try {
       sessionStorage.setItem(SEED_KEY, seed);
+      // Firefox shares `navigator` between documents in a tab, so the page's
+      // own copy can already be spoofed by a previous document. The worker's
+      // is always the real one.
+      if (realUa) sessionStorage.setItem(REAL_UA_KEY, realUa);
       if (locks && Object.keys(locks).length) {
         sessionStorage.setItem(LOCKS_KEY, JSON.stringify(locks));
       } else {
@@ -98,27 +106,70 @@
     }
   }
 
-  try {
-    // Fast path: the worker already stored this tab's seed when the tab was
-    // created, and session storage is much quicker to read than the worker is
-    // to wake up.
-    stateFromStorage().then((state) => {
-      if (state && !authoritative) publishSeed(state.seed, state.locks);
-    });
-
-    // Authoritative answer, in parallel.
-    chrome.runtime.sendMessage({ type: 'getSeed' }, (response) => {
-      if (!chrome.runtime.lastError && response && response.seed) {
-        authoritative = response.seed;
-        publishSeed(response.seed, response.locks);
-      }
-      start();
-    });
-    // Safety net if the worker never answers.
-    setTimeout(start, 1500);
-  } catch (e) {
-    start();
+  /** Excepted sites, and the whole extension when it is switched off. */
+  async function isExcepted() {
+    let settings = null;
+    try {
+      const stored = await chrome.storage.local.get(SETTINGS_KEY);
+      settings = stored && stored[SETTINGS_KEY];
+    } catch (e) { /* ignore */ }
+    if (settings && settings.enabled === false) return true;
+    const exceptions = (settings && settings.exceptions) || [];
+    if (!exceptions.length) return false;
+    try {
+      return __scrambiliniMatcher.matchesHost(location.hostname, exceptions);
+    } catch (e) {
+      return false;
+    }
   }
+
+  function startBridge() {
+    try {
+      // Fast path: the worker already stored this tab's seed when the tab was
+      // created, and session storage is much quicker to read than the worker is
+      // to wake up.
+      stateFromStorage().then((state) => {
+        if (state && !authoritative) publishSeed(state.seed, state.locks, null);
+      });
+
+      // Authoritative answer, in parallel.
+      chrome.runtime.sendMessage({ type: 'getSeed' }, (response) => {
+        try {
+          sessionStorage.setItem('__scrambilini_diag', JSON.stringify({
+            at: Date.now(),
+            seed: response && response.seed,
+            swUa: response && response.dbgUa,
+            pageUa: navigator.userAgent,
+            error: chrome.runtime.lastError && chrome.runtime.lastError.message,
+          }));
+        } catch (e) { /* ignore */ }
+        if (!chrome.runtime.lastError && response && response.seed) {
+          authoritative = response.seed;
+          publishSeed(response.seed, response.locks, response.realUa);
+        }
+        start();
+      });
+      // Safety net if the worker never answers.
+      setTimeout(start, 1500);
+    } catch (e) {
+      start();
+    }
+  }
+
+  isExcepted()
+    .then((excepted) => {
+      if (!excepted) {
+        startBridge();
+        return;
+      }
+      // Leave no trace of a previous identity on this origin.
+      try {
+        sessionStorage.removeItem(SEED_KEY);
+        sessionStorage.removeItem(LOCKS_KEY);
+        sessionStorage.removeItem(HEADER_KEY);
+      } catch (e) { /* ignore */ }
+    })
+    .catch(() => startBridge());
 
   chrome.runtime.onMessage.addListener((message) => {
     if (!message || message.type !== 'reseed') return;
@@ -129,6 +180,6 @@
     // the tab does not reload and the popup can show the new values.
     if (!message.seed) return;
     authoritative = message.seed;
-    publishSeed(message.seed, message.locks);
+    publishSeed(message.seed, message.locks, message.realUa);
   });
 })();

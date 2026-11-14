@@ -4,7 +4,7 @@
  *
  *   bun run test          (or: bun run test/all.ts)
  */
-const TESTS = ['navtiming', 'coherence', 'attributes', 'reseed', 'popup', 'locks', 'persistence', 'amiunique'];
+const TESTS = ['navtiming', 'coherence', 'attributes', 'reseed', 'popup', 'locks', 'persistence', 'toggle', 'exceptions', 'amiunique'];
 
 for (const name of TESTS) {
   console.log(`\n=== ${name} ===`);
