@@ -1,0 +1,11 @@
+{
+  "name": "scrambilini-saas-poc",
+  "private": true,
+  "type": "module",
+  "description": "Minimal fingerprint collection and matching service, as a proof of concept",
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "simulate": "bun run src/simulate.ts",
+    "test": "bun test"
+  }
+}
