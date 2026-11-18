@@ -46,7 +46,9 @@ function ask(tabId) {
 
 function sendSettings(patch) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: 'settings', ...patch }, (response) => {
+    // The worker reloads only this tab when the switch flips; every other tab
+    // in every window is left alone.
+    chrome.runtime.sendMessage({ type: 'settings', tabId: state.tabId, ...patch }, (response) => {
       resolve(response);
     });
   });

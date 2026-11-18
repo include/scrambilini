@@ -479,7 +479,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await reapplyRules();
       // Answer before reloading tabs: a slow page load must not hold the popup.
       sendResponse({ enabled: next.enabled, exceptions: next.exceptions });
-      reloadAffected(before, next).catch(() => {});
+      reloadAffected(before, next, message.tabId).catch(() => {});
     })().catch(() => sendResponse(null));
     return true;
   }
@@ -599,22 +599,87 @@ async function seedAllTabs() {
 }
 
 async function reapplyRules() {
+  const settings = await readSettings();
   const tabs = await chrome.tabs.query({});
+  // Read the session store once instead of three times per tab: on a browser
+  // with hundreds of tabs the per-tab round trips were the slow part.
+  let session = {};
+  try {
+    session = await chrome.storage.session.get(null);
+  } catch (e) { /* ignore */ }
+  const globalLocks = await readGlobalLocks();
+
+  const addRules = [];
   for (const tab of tabs) {
     if (typeof tab.id !== 'number') continue;
-    const seed = await readSeed(tab.id);
+    const seed = seeds.get(tab.id) || session[STORAGE_PREFIX + tab.id];
     if (!seed) continue;
-    await applyHeaders(tab.id, profileForSeed(seed, await readLocks(tab.id)));
+    seeds.set(tab.id, seed);
+    applied.add(tab.id);
+    if (!settings.enabled) continue;
+    const merged = mergeLocks(globalLocks, session[LOCKS_PREFIX + tab.id] || null);
+    const locks = Object.keys(merged).length ? merged : null;
+    addRules.push(buildRule(tab.id, profileForSeed(seed, locks), settings));
+  }
+
+  // One atomic upsert: ids in removeRuleIds are removed before addRules is
+  // applied, including the ones being replaced. A single bad rule cannot leave
+  // the rest uninstalled, because nothing is applied until the whole batch is
+  // valid.
+  try {
+    const existing = await chrome.declarativeNetRequest.getSessionRules();
+    await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: existing.map((rule) => rule.id),
+      addRules,
+    });
+  } catch (error) {
+    console.warn('[scrambilini] batch rule update failed, falling back per tab', error);
+    // Last resort: an independent update per tab, so one failure is contained.
+    for (const tab of tabs) {
+      if (typeof tab.id !== 'number') continue;
+      const seed = await readSeed(tab.id);
+      if (!seed) continue;
+      await applyHeaders(tab.id, profileForSeed(seed, await readLocks(tab.id)));
+    }
   }
 }
 
-/** Reload the tabs whose identity just changed, and only those. */
-async function reloadAffected(before, after) {
+/**
+ * Reload the tabs whose identity just changed, and only those.
+ *
+ * Turning the switch off used to reload every http(s) tab in every window, which
+ * on a browser with dozens of windows froze the machine. Only the tab that
+ * opened the popup is reloaded now; the rest keep their current document and
+ * pick up the new setting the next time they load.
+ */
+async function reloadAffected(before, after, focusTabId) {
   const enabledChanged = before.enabled !== after.enabled;
   const added = after.exceptions.filter((entry) => !before.exceptions.includes(entry));
   const removed = before.exceptions.filter((entry) => !after.exceptions.includes(entry));
   if (!enabledChanged && !added.length && !removed.length) return;
 
+  if (enabledChanged) {
+    let tab = null;
+    if (typeof focusTabId === 'number') {
+      try {
+        tab = await chrome.tabs.get(focusTabId);
+      } catch (e) { /* the tab is gone */ }
+    }
+    if (!tab) {
+      try {
+        [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      } catch (e) { /* ignore */ }
+    }
+    if (tab && typeof tab.id === 'number' && tab.url && /^https?:/i.test(tab.url)) {
+      try {
+        await chrome.tabs.reload(tab.id);
+      } catch (e) { /* ignore */ }
+    }
+    return;
+  }
+
+  // Exceptions are targeted: only tabs showing (or about to show) an affected
+  // host need the reload.
   const tabs = await chrome.tabs.query({});
   for (const tab of tabs) {
     if (typeof tab.id !== 'number' || !tab.url || !/^https?:/i.test(tab.url)) continue;
@@ -624,10 +689,8 @@ async function reloadAffected(before, after) {
     } catch (e) {
       continue;
     }
-    const affected = enabledChanged
-      || __scrambiliniMatcher.matchesHost(host, added)
-      || __scrambiliniMatcher.matchesHost(host, removed);
-    if (!affected) continue;
+    if (!__scrambiliniMatcher.matchesHost(host, added)
+      && !__scrambiliniMatcher.matchesHost(host, removed)) continue;
     try {
       await chrome.tabs.reload(tab.id);
     } catch (e) { /* ignore */ }

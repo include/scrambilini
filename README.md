@@ -172,6 +172,12 @@ The switch in the header turns scrambling off for every tab. Headers go back to
 the real ones, the APIs are left alone, and the popup says so. Turning it back
 on restores the same per-tab identity the tab had before.
 
+Flipping the switch reloads **only the tab the popup is acting on**. Reloading
+every tab in every window is what used to freeze a browser with dozens of open
+windows. The other tabs keep the page they already have; their header rule is
+updated right away, so their next load is fully real (or fully scrambled again)
+without a reload forced from here.
+
 **Exceptions** (the link at the bottom of the popup) is the per-site version.
 Add `www.sapo.pt` and that host keeps its real identity; add `*.gmail.com` and
 gmail.com plus every subdomain do. The list is global and survives restarts;
@@ -251,8 +257,9 @@ bun run test/reseed.ts        # reload keeps the identity, reseed changes it
 bun run test/popup.ts         # the popup rolls and stays open
 bun run test/locks.ts         # tick boxes survive a scramble and a reload
 bun run test/persistence.ts   # "Lock for all tabs" survives new tabs and restarts
-bun run test/toggle.ts        # the on/off switch
+bun run test/toggle.ts        # the on/off switch, and that only one tab reloads
 bun run test/exceptions.ts    # excepted sites keep their real identity
+bun run test/header-order.ts  # raw header order, with and without the extension
 bun run test/amiunique.ts 3   # three tabs on amiunique.org
 
 # or everything in order
@@ -277,6 +284,11 @@ is a Firefox one: a `Firefox/` UA, `productSub: 20100101`, `buildID` and
 `oscpu` present, and no `userAgentData`, `deviceMemory`, `connection`,
 `getBattery` or client hints.
 
+`header-order.ts` opens the same page twice — once with the extension, once
+without — over a raw socket, because the test server's own header map is
+alphabetical and hides the wire order. It checks that the user agent changed but
+the order of the headers did not.
+
 ## Limitations
 
 - **The first few milliseconds of a document** use a provisional identity: the
@@ -289,6 +301,23 @@ is a Firefox one: a `Firefox/` UA, `productSub: 20100101`, `buildID` and
 - **A navigation started within a few milliseconds of a tab being created** can
   beat the header rule into place. In practice a tab is created long before a
   user navigates; the window only shows up in synthetic tests.
+- **Header order is not randomized, in either browser.** `declarativeNetRequest`
+  can set, append and remove a header, but it cannot move one: the browser
+  builds the order and the extension edits values in place. A raw capture with
+  and without the extension shows the same order (`host`, `connection`,
+  `sec-ch-ua`, …, `accept-language`), and a header the extension adds — `dnt`,
+  when the identity sets it — goes at the end. Firefox's blocking `webRequest`
+  does not help either: a listener can change `User-Agent` and add a header, and
+  Firefox still puts `User-Agent` back in its own position (measured). So a site
+  that reads the header names in order, as amiunique does, sees the real browser
+  build. That order is the same for every tab and every user of that build, so
+  it does not tell your tabs apart; it can only show that the claimed version is
+  not the real one.
+- **The tab that is not reloaded keeps its current page.** Flipping the switch
+  updates every tab's header rule, but only the tab the popup acts on is
+  reloaded. An already-open background tab still runs the APIs it loaded with,
+  so its document and the headers it sends can disagree until it loads again.
+  Reloading all of them would close that window, and is what froze the machine.
 - **Only what a page can see is spoofed.** TLS/JA3, TCP/IP, and anything the
   browser exposes outside the patched APIs (e.g. `chrome.*`, permissions that
   are denied rather than faked) are untouched. The Firefox build has Firefox's
